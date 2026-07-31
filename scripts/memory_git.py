@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""
+Git auto-versioning for memory directory
+"""
+import subprocess, json, time
+from pathlib import Path
+from datetime import datetime
+
+from memory_config import MEMORY_DIR
+
+GIT_DIR = MEMORY_DIR / ".git"
+
+def _run_git(*args, cwd=None) -> str:
+    if cwd is None:
+        cwd = MEMORY_DIR
+    try:
+        r = subprocess.run(
+            ["git"] + list(args),
+            capture_output=True, timeout=30,
+            cwd=str(cwd), encoding="utf-8", errors="replace"
+        )
+        return r.stdout.strip()
+    except Exception as e:
+        return ""
+
+def init():
+    if not GIT_DIR.exists():
+        _run_git("init")
+        _run_git("config", "user.name", "opencode-memory")
+        _run_git("config", "user.email", "memory@opencode.local")
+        gitignore = MEMORY_DIR / ".gitignore"
+        if not gitignore.exists():
+            gitignore.write_text("semantic_model/\n__pycache__/\n*.pyc\n", encoding="utf-8")
+        _run_git("add", "-A")
+        _run_git("commit", "-m", "Memory repo initialized", "--allow-empty")
+
+def commit(message: str = ""):
+    if not GIT_DIR.exists():
+        init()
+    _run_git("add", "-A")
+    status = _run_git("status", "--porcelain")
+    if not status:
+        return
+    msg = message or f"Memory update {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    _run_git("commit", "-m", msg)
+
+def log(limit: int = 10) -> list:
+    if not GIT_DIR.exists():
+        return []
+    out = _run_git("log", f"--max-count={limit}", "--oneline", "--pretty=format:%h|%s|%ar")
+    lines = []
+    for line in out.split("\n"):
+        if "|" in line:
+            parts = line.split("|", 2)
+            lines.append({"hash": parts[0], "message": parts[1], "date": parts[2] if len(parts) > 2 else ""})
+    return lines
+
+def rollback(hash: str):
+    if not GIT_DIR.exists():
+        return False
+    _run_git("restore", "--source", hash, "--", ".")
+    commit(f"Rolled back to {hash}")
+    return True
+
+def status() -> dict:
+    if not GIT_DIR.exists():
+        return {"initialized": False}
+    commits = len(_run_git("rev-list", "--count", "HEAD").split("\n")[0].strip()) > 0
+    commit_count = _run_git("rev-list", "--count", "HEAD")
+    return {
+        "initialized": True,
+        "commits": int(commit_count) if commit_count.isdigit() else 0,
+        "has_changes": bool(_run_git("status", "--porcelain"))
+    }

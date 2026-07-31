@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 def get_opencode_global() -> Path:
-    """~/.config/opencode/memory — global memory system root."""
+    """~/.config/opencode/memory - global memory system root."""
     return Path.home() / ".config" / "opencode" / "memory"
 
 def get_project_root() -> Path:
@@ -45,9 +45,6 @@ def ensure_dirs():
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     DAILY_DIR.mkdir(parents=True, exist_ok=True)
 
-
-# Faiss 原生 C++ I/O 不支持中文路径，用序列化绕开
-# 延迟导入 faiss/numpy，避免 MCP server 启动时阻塞（import 需 ~6s）
 _faiss = None
 _np = None
 
