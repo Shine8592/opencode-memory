@@ -240,15 +240,22 @@ def do_remember(args):
     global _stm_cache, _stm_embed_stale
     content = _clean_surrogates(args["content"])
     tags = args.get("tags", "")
+    # 容错：tags 兼容 str（逗号分隔）与 list 两种格式
+    if isinstance(tags, list):
+        tag_list = [str(t).strip() for t in tags if str(t).strip()]
+    elif isinstance(tags, str) and tags.strip():
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+    else:
+        tag_list = []
     from dual_memory_engine import ShortTermMemory
     stm = ShortTermMemory()
     meta = {}
-    if tags:
-        meta["tags"] = [t.strip() for t in tags.split(",")]
+    if tag_list:
+        meta["tags"] = [_clean_surrogates(t) for t in tag_list]
     content = _clean_surrogates(content)
     meta_clean = {}
-    if tags:
-        meta_clean["tags"] = [_clean_surrogates(t.strip()) for t in tags.split(",")]
+    if tag_list:
+        meta_clean["tags"] = [_clean_surrogates(t) for t in tag_list]
     item_id = stm.add(content, metadata=meta_clean)
     _stm_cache = None
     _stm_embed_stale = True
@@ -307,12 +314,14 @@ def do_reindex(args):
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         return "Index rebuild started in background"
-    from build_full_index import extract_core_and_logs, build_index as do_build
+    # 本地版 build_full_index 接口：extract_session_text + extract_from_statedb + build_index
+    from build_full_index import extract_session_text, extract_from_statedb, build_index as do_build
     ensure_dirs()
-    chunks = extract_core_and_logs()
-    MAX_CHUNKS = 200
+    chunks = extract_session_text()
+    chunks.extend(extract_from_statedb(max_sessions=50))
+    MAX_CHUNKS = 500
     if len(chunks) > MAX_CHUNKS:
-        chunks.sort(key=lambda c: c.get("timestamp", ""), reverse=True)
+        chunks.sort(key=lambda c: str(c.get("timestamp", "")), reverse=True)
         chunks = chunks[:MAX_CHUNKS]
     if not chunks:
         return "No indexable content found"
@@ -335,8 +344,11 @@ def do_history(args):
 @tool("memory_rollback")
 def do_rollback(args):
     from memory_git import rollback as git_rollback
-    ok = git_rollback(args["hash"])
-    return f"Rolled back to {args['hash']}" if ok else "Rollback failed"
+    h = args.get("hash", "")
+    if not h:
+        return "Rollback failed: missing 'hash' parameter (commit hash)"
+    ok = git_rollback(h)
+    return f"Rolled back to {h}" if ok else "Rollback failed"
 
 @tool("memory_sync")
 def do_sync(args):
