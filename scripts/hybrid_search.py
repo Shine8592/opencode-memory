@@ -10,15 +10,20 @@ import math
 from pathlib import Path
 
 
+# ---------------------------------------------------------------------------
+# 中文感知分词：ASCII 词 + CJK 单字/双字
+# ---------------------------------------------------------------------------
 def tokenize(text: str) -> list:
     """中英文混合分词：英文按单词，中文按单字+双字（bigram）"""
     if not text:
         return []
     tokens = []
     lower = text.lower()
+    # 英文单词 / 数字 / 代码标识符（含下划线、点、连字符）
     for w in re.findall(r"[a-z0-9_\-\.]+", lower):
         if len(w) >= 1:
             tokens.append(w)
+    # 中日韩统一表意文字：单字 + 相邻双字
     cjk = re.findall(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]", text)
     if cjk:
         tokens.extend(cjk)
@@ -27,39 +32,47 @@ def tokenize(text: str) -> list:
     return tokens
 
 
+# ---------------------------------------------------------------------------
+# BM25 索引
+# ---------------------------------------------------------------------------
 class BM25Index:
     """增量式 BM25 索引（k1=1.5, b=0.75 标准参数）"""
 
     def __init__(self):
-        self.docs = []
-        self.doc_count = 0
+        self.docs = []          # [{id, text, source, mem_type, extra}]
+        self.doc_count = 0      # N
         self.avgdl = 0.0
-        self.df = {}
-        self.postings = {}
+        self.df = {}            # term -> 文档频次
+        self.postings = {}      # term -> {doc_idx: bm25_score}
         self._tokenized = []
+        self._dirty = True
 
     def set_docs(self, docs: list):
+        """docs: [{id, text, source, mem_type, extra}]"""
         self.docs = docs or []
         self._tokenized = []
         self.doc_count = len(self.docs)
         self.avgdl = 0.0
         self.df = {}
         self.postings = {}
+        # 分词
         for d in self.docs:
             toks = tokenize(d.get("text", ""))
             self._tokenized.append(toks)
         if self.doc_count:
             self.avgdl = sum(len(t) for t in self._tokenized) / self.doc_count
+        # 文档频次
         for toks in self._tokenized:
             for t in set(toks):
                 self.df[t] = self.df.get(t, 0) + 1
+        # BM25 得分
         N = self.doc_count
         for i, toks in enumerate(self._tokenized):
             dl = len(toks)
             for t in set(toks):
                 tf = toks.count(t)
                 idf = math.log((N - self.df[t] + 0.5) / (self.df[t] + 0.5) + 1.0)
-                score = idf * (tf * (1.5 + 1)) / (tf + 1.5 * (1 - 0.75 + 0.75 * dl / max(self.avgdl, 1)))
+                score = idf * (tf * (1.5 + 1)) / (tf + 1.5 * (1 - 0.75 + 0.75 * dl / max(self.avgdl, 1e-9)))
                 self.postings.setdefault(t, {})[i] = score
 
     def search(self, query: str, top_k: int = 10) -> list:
@@ -89,6 +102,9 @@ class BM25Index:
         return results
 
 
+# ---------------------------------------------------------------------------
+# RRF 融合（Reciprocal Rank Fusion）
+# ---------------------------------------------------------------------------
 def rrf_merge(result_lists: list, top_k: int, k: int = 60) -> list:
     """多路结果 RRF 融合：score(d) = Σ 1/(k + rank(d))，k 默认 60"""
     scores = {}
@@ -108,9 +124,13 @@ def rrf_merge(result_lists: list, top_k: int, k: int = 60) -> list:
     return out
 
 
+# ---------------------------------------------------------------------------
+# 便捷构建：从 STM 目录 + 元数据构建 BM25 索引
+# ---------------------------------------------------------------------------
 def build_from_stm(stm_dir: Path, metadata_path: Path) -> BM25Index:
     """聚合 STM 文件和 FAISS 元数据为 BM25 语料"""
     docs = []
+    # STM 短期记忆（实时）
     if stm_dir.exists():
         for f in sorted(stm_dir.glob("*.json")):
             try:
@@ -126,6 +146,7 @@ def build_from_stm(stm_dir: Path, metadata_path: Path) -> BM25Index:
                     })
             except Exception:
                 continue
+    # FAISS 元数据（核心文件索引）
     if metadata_path.exists():
         try:
             for entry in json.loads(metadata_path.read_text(encoding="utf-8")):
