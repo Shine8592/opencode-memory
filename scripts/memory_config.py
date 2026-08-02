@@ -2,16 +2,24 @@ import os
 from pathlib import Path
 
 def get_opencode_global() -> Path:
-    """~/.config/opencode/memory - global memory system root."""
+    """全局记忆系统根目录（跨 Agent 通用，不依赖 opencode 专属路径）。"""
+    env = os.environ.get("MEMORY_GLOBAL_DIR")
+    if env:
+        return Path(env).resolve()
     return Path.home() / ".config" / "opencode" / "memory"
 
 def get_project_root() -> Path:
-    env = os.environ.get("OPENCODE_PROJECT_ROOT")
+    """项目根目录：优先 MEMORY_PROJECT_ROOT（跨 Agent 通用），兼容 OPENCODE_PROJECT_ROOT。"""
+    env = os.environ.get("MEMORY_PROJECT_ROOT") or os.environ.get("OPENCODE_PROJECT_ROOT")
     if env:
         return Path(env).resolve()
     return Path.cwd().resolve()
 
 def get_memory_dir() -> Path:
+    """项目级记忆存储目录（兼容旧路径 .opencode/memory，支持 MEMORY_STORE 覆盖）。"""
+    env = os.environ.get("MEMORY_STORE")
+    if env:
+        return Path(env).resolve()
     return get_project_root() / ".opencode" / "memory"
 
 def get_scripts_dir() -> Path:
@@ -26,14 +34,39 @@ SCRIPTS_DIR = get_scripts_dir()
 
 INDEX_PATH = MEMORY_DIR / "semantic_index.faiss"
 METADATA_PATH = MEMORY_DIR / "semantic_metadata.json"
-MODEL_PATH = get_opencode_global() / "semantic_model"
+
+# 嵌入模型：支持 MEMORY_MODEL_NAME 覆盖，智能默认：优先多语言（已下载），否则回退旧模型
+_ML_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"   # 优先：中英文效果均佳
+_EN_MODEL  = "all-MiniLM-L6-v2"                        # 回退：仅英文，但已下载
+
+def _choose_default_model() -> str:
+    """自动选最佳已缓存模型"""
+    global_dir = get_opencode_global()
+    ml_cache = global_dir / "models" / _ML_MODEL.replace("/", "_").replace(":", "_")
+    if ml_cache.exists():
+        return _ML_MODEL
+    legacy = global_dir / "semantic_model"
+    if legacy.exists():
+        return _EN_MODEL
+    return _ML_MODEL
+
+DEFAULT_MODEL = _ML_MODEL
+MODEL_NAME = os.environ.get("MEMORY_MODEL_NAME", _choose_default_model())
+
+def get_model_path() -> Path:
+    """模型本地缓存目录（按模型名区分，避免混用）"""
+    safe = MODEL_NAME.replace("/", "_").replace(":", "_")
+    return get_opencode_global() / "models" / safe
+
+MODEL_PATH = get_model_path()
+
 STM_DIR = MEMORY_DIR / "stm"
 LTM_FILE = HERMES_DIR / "MEMORY.md"
 COORDINATOR_FILE = MEMORY_DIR / "memory_coordinator.json"
 ARCHIVE_DIR = MEMORY_DIR / "archive"
 DAILY_DIR = MEMORY_DIR / "daily"
+DIFF_LOG_PATH = MEMORY_DIR / "memory_diff.jsonl"   # 审计日志
 
-MODEL_NAME = "all-MiniLM-L6-v2"
 MAX_CHUNK_CHARS = 1200
 
 CORE_FILES = ["SOUL.md", "USER.md", "MEMORY.md", "AGENTS.md"]
