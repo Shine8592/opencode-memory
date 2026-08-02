@@ -105,7 +105,7 @@ def cmd_recall(args: dict) -> dict:
     query = args.get("query", "")
     top_k = min(args.get("top_k", 5), 20)
     if not query:
-        return {"ok": False, "error": "Query is empty"}
+        return {"ok": False, "error": "查询内容为空"}
     # Try semantic search first
     semantic_ok = False
     if INDEX_PATH.exists():
@@ -134,9 +134,9 @@ def cmd_recall(args: dict) -> dict:
         results = _bm25_search(query, top_k=top_k)
         if results:
             return {"ok": True, "results": results, "method": "bm25"}
-        return {"ok": True, "results": [], "method": "bm25", "note": "Semantic unavailable, BM25 no matches"}
+        return {"ok": True, "results": [], "method": "bm25", "note": "语义搜索不可用，BM25 也未找到匹配"}
     except Exception as e:
-        return {"ok": False, "error": f"Search failed (both semantic+BM25 unavailable): {e}"}
+        return {"ok": False, "error": f"搜索失败（语义+BM25均不可用）: {e}"}
 
 def cmd_remember(args: dict) -> dict:
     from dual_memory_engine import ShortTermMemory
@@ -205,7 +205,7 @@ def cmd_score_all(args: dict) -> dict:
     return {"ok": True, "updated": updated}
 
 def _calc_importance(age_hours: float, access_count: int = 0) -> float:
-    decay = 2.718 ** (-0.01 * age_hours)
+    decay = 2.718 ** (-0.01 * age_hours)  # Ebbinghaus: lambda=0.01
     access_bonus = min(access_count * 0.1, 0.3)
     score = decay * 0.7 + access_bonus * 0.3
     return round(max(0.0, min(1.0, score)), 4)
@@ -287,7 +287,7 @@ def cmd_reindex(args: dict) -> dict:
             [sys.executable, str(Path(__file__).parent / "build_full_index.py")],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        return {"ok": True, "note": "Index rebuild started in background"}
+        return {"ok": True, "note": "索引重建已在后台启动"}
     from build_full_index import extract_core_and_logs, build_index as do_build
     from memory_config import ensure_dirs
     ensure_dirs()
@@ -298,7 +298,7 @@ def cmd_reindex(args: dict) -> dict:
             chunks.sort(key=lambda c: c.get("timestamp", ""), reverse=True)
             chunks = chunks[:MAX_CHUNKS]
         if not chunks:
-            return {"ok": False, "error": "No indexable content found"}
+            return {"ok": False, "error": "没有找到可索引的内容"}
         do_build(chunks)
     return {"ok": True, "indexed": len(chunks)}
 
@@ -326,12 +326,12 @@ def handle_request(raw: str) -> str:
     try:
         req = json.loads(raw)
     except json.JSONDecodeError:
-        return json.dumps({"ok": False, "error": "JSON parse failed"})
+        return json.dumps({"ok": False, "error": "JSON 解析失败"})
     cmd = req.get("cmd", "")
     args = req.get("args", {})
     handler = CMDS.get(cmd)
     if not handler:
-        return json.dumps({"ok": False, "error": f"Unknown command: {cmd}"})
+        return json.dumps({"ok": False, "error": f"未知命令: {cmd}"})
     try:
         result = handler(args)
         return json.dumps(result, ensure_ascii=False, default=str)
@@ -352,7 +352,7 @@ if __name__ == "__main__":
     else:
         # Single-shot mode
         if len(sys.argv) < 2:
-            print(json.dumps({"ok": False, "error": "Need command argument"}))
+            print(json.dumps({"ok": False, "error": "需要命令参数"}))
             sys.exit(1)
         cmd = sys.argv[1]
         args = {}
@@ -363,7 +363,7 @@ if __name__ == "__main__":
                 args = {}
         handler = CMDS.get(cmd)
         if not handler:
-            print(json.dumps({"ok": False, "error": f"Unknown command: {cmd}"}))
+            print(json.dumps({"ok": False, "error": f"未知命令: {cmd}"}))
             sys.exit(1)
         try:
             result = handler(args)
