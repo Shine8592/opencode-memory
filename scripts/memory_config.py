@@ -53,6 +53,23 @@ def _choose_default_model() -> str:
 DEFAULT_MODEL = _ML_MODEL
 MODEL_NAME = os.environ.get("MEMORY_MODEL_NAME", _choose_default_model())
 
+# --- Cross-encoder 重排模型（v3.0，支持 MEMORY_RERANKER 环境变量；off 禁用） ---
+_DEF_RERANKER = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+def get_reranker_path() -> Path:
+    safe = _DEF_RERANKER.replace("/", "_").replace(":", "_")
+    return get_opencode_global() / "rerankers" / safe
+
+_RERANK_ENV = os.environ.get("MEMORY_RERANKER", "").strip()
+if _RERANK_ENV.lower() == "off":
+    RERANK_ENABLED = False
+    RERANKER_NAME = ""
+    RERANKER_PATH = None
+else:
+    RERANK_ENABLED = True
+    RERANKER_NAME = _RERANK_ENV or _DEF_RERANKER
+    RERANKER_PATH = get_reranker_path()
+
 def get_model_path() -> Path:
     """模型本地缓存目录（按模型名区分，避免混用）"""
     safe = MODEL_NAME.replace("/", "_").replace(":", "_")

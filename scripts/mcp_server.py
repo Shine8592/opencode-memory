@@ -807,9 +807,14 @@ def do_rollback(args):
 def do_session_save(args):
     """保存会话快照（P2-4，借鉴 Context Mode 5钩子思路）
     不依赖 hook，让 Agent 在会话结束时主动调用以持久化工作状态。"""
-    tasks = _clean_surrogates(args.get("tasks", "")).strip()
-    files = _clean_surrogates(args.get("files", "")).strip()
-    note  = _clean_surrogates(args.get("note",  "")).strip()
+    def _to_text(v):
+        """兼容 str 与 list 两种参数格式"""
+        if isinstance(v, list):
+            return "\n".join(str(x) for x in v if str(x).strip())
+        return str(v or "")
+    tasks = _clean_surrogates(_to_text(args.get("tasks", ""))).strip()
+    files = _clean_surrogates(_to_text(args.get("files", ""))).strip()
+    note  = _clean_surrogates(_to_text(args.get("note", ""))).strip()
 
     if not (tasks or files or note):
         return "❌ 未提供任何内容，快照为空"
