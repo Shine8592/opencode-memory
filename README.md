@@ -1,71 +1,181 @@
-# OpenCode Memory System
+# 🧠 OpenCode Memory — 下一代 AI 编程 Agent 记忆系统
 
-基于 MCP 协议的 AI 记忆系统，支持语义向量检索、双记忆引擎、Git 版本管理。可接入任何支持 MCP 的 AI 客户端（OpenCode、HERMES、Claude Desktop、Cursor 等）。
+<div align="center">
 
-## 功能特性
+![version](https://img.shields.io/badge/version-3.0-blue)
+![Python](https://img.shields.io/badge/Python-3.10%2B-green)
+![MCP](https://img.shields.io/badge/Protocol-MCP%20JSON--RPC-orange)
+![Agents](https://img.shields.io/badge/Agents-13%2B-purple)
+![License](https://img.shields.io/badge/License-MIT-brightgreen)
+![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-| 功能 | 说明 |
-|------|------|
-| 语义向量检索 | 基于 sentence-transformers + FAISS，支持中英文语义搜索 |
-| 双记忆引擎 | 短期记忆（JSON 文件）+ 长期记忆（Markdown） |
-| Git 版本管理 | 记忆自动 commit，支持回滚 |
-| 自动编码识别 | UTF-8 优先，自动回退系统编码，兼容 Windows 中文环境 |
-| 代理字符防护 | 递归清洗 UTF-16 代理字符，防止编码崩溃 |
-| MCP 标准协议 | JSON-RPC over stdio，任何 MCP 客户端可直接调用 |
+**让你的 AI 编程助手真正记住你：偏好、决策、踩过的坑、项目上下文。**  
+**跨会话、跨 Agent、离线优先、中英文同等流畅。**
 
-## 提供的 MCP 工具
+[快速开始](#-快速开始) · [工具文档](#-12-个-mcp-工具) · [架构设计](#-架构设计) · [安装到任意-Agent](#-一键安装到任意-agent-13-个)
 
-| 工具名 | 说明 |
-|--------|------|
-| `memory_remember` | 保存记忆（自动存储 + Git commit） |
-| `memory_recall` | 语义搜索记忆（合并 FAISS 索引 + 实时文件搜索） |
-| `memory_forget` | 按关键词删除记忆 |
-| `memory_status` | 查看系统状态（索引、模型、记忆数量） |
-| `memory_reindex` | 重建向量索引（支持后台运行） |
-| `memory_history` | 查看 Git 变更历史 |
-| `memory_rollback` | 回滚到指定版本 |
-| `memory_sync` | 初始化/同步 Git 仓库 |
+</div>
 
-## 快速安装
+---
 
-### 1. 安装依赖
+## ✨ 为什么选择 OpenCode Memory？
+
+市面上的 AI 记忆系统要么需要托管云服务和 API Key，要么需要运行 Neo4j + Qdrant 双数据库，要么只支持英文。**OpenCode Memory** 的设计原则是：**纯本地、纯 Python、零外部服务、中英文同等流畅**。
+
+| 对比项 | OpenCode Memory | mem0 | cognee | letta |
+|--------|-----------------|------|--------|-------|
+| 完全离线 | ✅ 无需任何 API Key | ❌ 需 OpenAI Key | ❌ 需 LLM API | ❌ 需 LLM API |
+| 单进程部署 | ✅ 纯 Python 单文件 | ✅ | ❌ 需 Neo4j/Qdrant | ❌ 需数据库 |
+| Git 原生版本管理 | ✅ 每条记忆自动 commit | ❌ | ❌ | ❌ |
+| 中文优化 | ✅ 多语言模型 + CJK 分词 | ⚠️ 需配置 | ⚠️ | ❌ |
+| 混合检索 BM25+向量+RRF | ✅ + CrossEncoder 精排 | ✅ | ✅ | ❌ |
+| 跨 Agent 一键安装 | ✅ 13 个 Agent | ✅ 32+ | ⚠️ | ❌ |
+| 记忆版本回滚 | ✅ `memory_rollback` | ❌ | ❌ | ❌ |
+
+---
+
+## 🚀 核心特性
+
+### 🔍 四段式混合检索（业界 SOTA 方案）
+
+```
+查询 "GBK 编码踩坑"
+       │
+       ├─► BM25 关键词检索   ─────────────────────┐
+       │   (CJK bigram 分词，精确词汇命中)          │
+       │                                          ├─► RRF 融合排序
+       ├─► FAISS 向量检索    ─────────────────────┤   (Reciprocal Rank
+       │   (核心文件语义索引)                       │    Fusion)
+       │                                          │
+       └─► STM 实时向量搜索  ─────────────────────┘
+           (无需 reindex，写入即可检索)             │
+                                                  ↓
+                                        Cross-encoder 精排
+                                        (ms-marco-MiniLM)
+                                                  │
+                                                  ↓
+                                    #1 (relv 1.00) [pitfall] ...
+                                    #2 (relv 0.87) [decision] ...
+```
+
+借鉴 **Hindsight**（LongMemEval SOTA）的四路并行 + CrossEncoder 精排方案，检索准确率显著优于纯向量 RAG。
+
+### 🌍 多语言嵌入模型
+
+默认使用 `paraphrase-multilingual-MiniLM-L12-v2`（384 维），中文、英文、日文、韩文同等流畅。可通过环境变量切换任意 sentence-transformers 兼容模型：
 
 ```bash
+export MEMORY_MODEL_NAME=BAAI/bge-large-zh-v1.5  # 切换到中文专项模型
+```
+
+### 🏷️ 智能记忆分类
+
+每条记忆自动推断功能类型，无需手动标注：
+
+| 类型 | 触发关键词示例 | 用途 |
+|------|--------------|------|
+| `pitfall` | 踩坑、报错、exception、教训 | 避免重复犯错 |
+| `decision` | 架构、决策、选型、设计 | 保持技术一致性 |
+| `preference` | 偏好、习惯、喜欢 | 个性化交互 |
+| `skill` | 命令、用法、how to | 技能积累 |
+| `event` | 会话快照、任务进度 | 跨会话状态恢复 |
+| `config` | 配置、安装、setup | 环境记录 |
+| `fact` | 其他信息 | 通用存储 |
+
+### 🔐 Git 原生版本管理
+
+记忆不只是存储——每次写入、删除、演化操作都自动生成 Git commit，完整审计、随时回滚：
+
+```bash
+# 查看记忆变更历史
+memory_history()
+# → 📜 记忆变更历史 (共 138 次提交)
+#     be365be  v3.0: memory_prime + Cross-encoder 重排 + ...
+#     07caece  BUG修复: Cross-encoder logits 改用 min-max 归一化
+#     966c571  v2.0: 索引用多语言模型重建 (11 chunks, 384d)
+
+# 回滚到任意版本
+memory_rollback(hash="07caece")
+```
+
+### 🧬 Reflect 离线演化
+
+借鉴 **EverOS Reflection** 机制，记忆越用越精炼：
+
+```
+memory_reflect(apply=True, threshold=0.82)
+# → 贪心聚类：相似度 ≥ 0.82 的记忆归为一簇
+# → 每簇保留信息量最大的记忆（内容最长）
+# → 合并标签，记录 merged_from
+# → 高价值记忆自动提升到 MEMORY.md（LTM）
+```
+
+---
+
+## 📦 12 个 MCP 工具
+
+| 工具 | 功能 | 亮点 |
+|------|------|------|
+| `memory_prime` | **会话启动上下文注入** | 一次调用返回：偏好 + 踩坑 + 决策 + 任务相关记忆，替代多次单独检索 |
+| `memory_recall` | **混合语义检索** | BM25 + 向量 + RRF + CrossEncoder，支持 `type_filter` 精准过滤 |
+| `memory_remember` | **智能记忆保存** | 自动类型推断、语义去重（>0.9 拦截）、diff 审计 |
+| `memory_reflect` | **离线记忆演化** | 聚类合并冗余，提炼高价值记忆到 LTM，preview/apply 双模式 |
+| `memory_session_save` | **会话快照** | 保存任务进度 + 文件列表 + 决策，下次会话一键恢复 |
+| `memory_transfer` | **STM→LTM 转移** | 手动触发高重要性短期记忆提升到长期记忆 |
+| `memory_status` | **系统状态** | 显示索引条目、STM 类型分布、审计日志统计 |
+| `memory_forget` | **关键词删除** | BM25 缓存联动失效，删除即时生效 |
+| `memory_reindex` | **重建向量索引** | 支持后台/前台，自动去重，多语言模型 |
+| `memory_history` | **变更历史** | 查看 Git 提交记录 |
+| `memory_rollback` | **版本回滚** | 回滚到任意 commit |
+| `memory_sync` | **Git 初始化/同步** | 一键初始化记忆仓库 |
+
+---
+
+## ⚡ 快速开始
+
+### 方式一：一键安装到任意 Agent（推荐）
+
+```bash
+git clone https://github.com/Shine8592/opencode-memory
+cd opencode-memory
+
 pip install -r requirements.txt
+
+# 安装到所有已检测到的 Agent
+python scripts/install_memory_mcp.py --all
+
+# 或安装到指定 Agent
+python scripts/install_memory_mcp.py claude-code cursor kiro
 ```
 
-### 2. 下载模型（首次运行自动下载）
+重启对应 Agent 即可使用所有 `memory_*` 工具。
+
+### 方式二：手动配置
 
 ```bash
-python scripts/semantic_search.py --download
+pip install sentence-transformers faiss-cpu numpy
 ```
 
-### 3. 配置 MCP 客户端
+然后根据你的 Agent 选择对应配置：
 
-#### OpenCode (`~/.config/opencode/opencode.jsonc`)
+<details>
+<summary><b>OpenCode</b>（<code>~/.config/opencode/opencode.jsonc</code>）</summary>
 
-```json
+```jsonc
 {
   "mcp": {
     "memory": {
       "type": "local",
-      "command": ["python", "-u", "scripts/mcp_server.py"],
+      "command": ["python", "-u", "/path/to/scripts/mcp_server.py"],
       "enabled": true
     }
   }
 }
 ```
+</details>
 
-#### HERMES (`~/.hermes/config.yaml`)
-
-```yaml
-mcp_servers:
-  memory:
-    type: stdio
-    command: ["python", "-u", "/path/to/scripts/mcp_server.py"]
-```
-
-#### Claude Desktop (`claude_desktop_config.json`)
+<details>
+<summary><b>Claude Code</b>（<code>~/.claude/settings.json</code>）</summary>
 
 ```json
 {
@@ -77,81 +187,184 @@ mcp_servers:
   }
 }
 ```
+</details>
 
-## 目录结构
+<details>
+<summary><b>Cursor</b>（<code>~/.cursor/mcp.json</code>）</summary>
 
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "python",
+      "args": ["-u", "/path/to/scripts/mcp_server.py"]
+    }
+  }
+}
 ```
-opencode-memory/
-├── scripts/                    # MCP Server 核心脚本
-│   ├── mcp_server.py          # MCP Server 主入口（JSON-RPC over stdio）
-│   ├── semantic_search.py     # 语义向量检索（sentence-transformers + FAISS）
-│   ├── dual_memory_engine.py  # 双记忆协同引擎
-│   ├── build_full_index.py    # 向量索引构建工具
-│   ├── memory_config.py       # 路径配置（自动适配系统）
-│   ├── memory_git.py          # Git 自动版本管理
-│   ├── storage_tiers.py       # 三层存储（热/温/冷）
-│   ├── memory_maintain.py     # 记忆维护工具
-│   ├── memory_dedup.py        # 记忆去重
-│   ├── auto_index_updater.py  # 自动索引更新
-│   ├── plugin_bridge.py       # 插件桥接（BM25 混合检索）
-│   └── init_dual_memory.py    # 双记忆引擎初始化
-├── plugins/
-│   └── memory-plugin/
-│       └── index.ts           # OpenCode 插件（可选）
-├── skills/
-│   └── memory-system/
-│       └── SKILL.md           # AI 技能文档
-├── requirements.txt           # Python 依赖
-├── .gitignore
-└── README.md
+</details>
+
+<details>
+<summary><b>Zed</b>（<code>~/.config/zed/settings.json</code>）</summary>
+
+```json
+{
+  "context_servers": {
+    "memory": {
+      "command": { "path": "python", "args": ["-u", "/path/to/scripts/mcp_server.py"] }
+    }
+  }
+}
 ```
+</details>
 
-## 工作原理
+---
 
-### 编码处理流程
+## 🔧 一键安装到任意 Agent（13 个）
 
-```
-客户端发送 UTF-8 字节
-        ↓
-┌─────────────────────────────────────┐
-│  _detect_decode() 自动识别编码       │
-│  ① 先试 UTF-8（MCP 标准协议）        │
-│  ② 失败→试系统编码（cp936/cp1252）   │
-│  ③ 再失败→UTF-8 + 替换非法字符       │
-└─────────────────────────────────────┘
-        ↓
-┌─────────────────────────────────────┐
-│  _clean_surrogates() 移除代理字符    │
-│  _clean_obj() 递归清洗整个响应       │
-└─────────────────────────────────────┘
-        ↓
-  存储为 UTF-8 JSON 文件
+```bash
+python scripts/install_memory_mcp.py --list  # 检测已安装的 Agent
 ```
 
-### 记忆检索流程
+| Agent | 支持 | 配置格式 |
+|-------|------|----------|
+| opencode | ✅ | `mcp.<name>` |
+| Claude Code | ✅ | `mcpServers` |
+| Cursor | ✅ | `mcpServers` |
+| Windsurf | ✅ | `mcpServers` |
+| Codex CLI | ✅ | `mcpServers` |
+| Kiro | ✅ | `mcpServers` |
+| Zed | ✅ | `context_servers` |
+| Continue | ✅ | `modelContextProtocolServers` |
+| Cline (VSCode) | ✅ | `mcpServers` |
+| Roo Code (VSCode) | ✅ | `mcpServers` |
+| Gemini CLI | ✅ | `mcpServers` |
+| VS Code Copilot | ✅ | `mcpServers` |
+| Trae | ✅ | `mcpServers` |
+
+> 安装器自动备份原配置（`*.bak`），安装/卸载幂等，重复执行无副作用。
+
+---
+
+## 🏗️ 架构设计
+
+### 存储结构
 
 ```
-memory_recall("查询")
-        ↓
-   ┌────┴────┐
-   ↓         ↓
-FAISS 索引  STM 文件实时编码
-(预构建)    (即时搜索)
-   ↓         ↓
-   └────┬────┘
-        ↓
-   合并去重 + 按相似度排序
-        ↓
-   返回 Top-K 结果
+项目根目录/
+└── .opencode/
+    ├── SOUL.md          ─── Agent 核心人格
+    ├── USER.md          ─── 用户画像
+    ├── MEMORY.md        ─── 长期记忆（LTM）
+    ├── AGENTS.md        ─── Agent 配置
+    └── memory/
+        ├── stm/             ─── 短期记忆（JSON，24h 窗口）
+        ├── semantic_index.faiss   ─── 向量索引
+        ├── semantic_metadata.json ─── 索引元数据
+        ├── memory_diff.jsonl      ─── 操作审计日志
+        ├── archive/         ─── 冷存储归档
+        └── daily/           ─── 每日日志
 ```
 
-## 依赖
+全局安装目录：`~/.config/opencode/memory/`，多项目共享同一套脚本，按项目根目录隔离记忆存储。
 
-- Python 3.10+
-- sentence-transformers（语义编码）
-- faiss-cpu（向量索引）
-- numpy
+### 记忆生命周期
 
-## 许可证
+```
+写入 (memory_remember)
+  → 精确去重检查
+  → 语义去重 (相似度 > 0.9)
+  → 自动 type 推断
+  → 重要性评分
+  → 写入 STM (JSON)
+  → Git auto-commit
+  → diff 审计日志
 
-MIT License
+检索 (memory_recall)
+  → BM25 关键词 + FAISS 向量 + STM 实时向量
+  → RRF 融合排序
+  → Cross-encoder 精排
+  → type_filter 精准过滤
+
+演化 (memory_reflect)
+  → 贪心聚类（余弦相似度 ≥ 阈值）
+  → 冗余合并（保留信息量最大项）
+  → 高价值记忆提升 LTM
+
+过期 (24h 后)
+  → 重要性评估
+  → 高分记忆语义蒸馏写入 MEMORY.md
+  → 低分记忆清理
+```
+
+### 编码防御（Windows 中文兼容）
+
+专为中文 Windows 环境（GBK 系统编码）设计的三级防御：
+
+```
+stdin 字节流
+  ① 先试 UTF-8（MCP 协议标准）
+  ② 失败 → 系统编码（cp936/cp1252）
+  ③ 再失败 → UTF-8 + replace 兜底
+
++ _clean_surrogates() 递归清洗 UTF-16 代理字符
++ 所有文件 IO 显式指定 encoding="utf-8"
+```
+
+---
+
+## 🛠️ 环境变量配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MEMORY_PROJECT_ROOT` | `cwd` | 项目根目录（跨 Agent 通用） |
+| `MEMORY_MODEL_NAME` | `paraphrase-multilingual-MiniLM-L12-v2` | 嵌入模型名称 |
+| `MEMORY_RERANKER` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | 精排模型（设为 `off` 禁用） |
+| `MEMORY_GLOBAL_DIR` | `~/.config/opencode/memory` | 全局脚本目录 |
+| `MEMORY_STORE` | `<project>/.opencode/memory` | 记忆存储目录 |
+
+---
+
+## 📋 依赖
+
+```
+sentence-transformers  # 语义嵌入 + Cross-encoder 精排
+faiss-cpu             # 向量索引
+numpy                 # 数值计算
+```
+
+Python 3.10+，无需外部数据库、无需 Docker、无需 API Key。
+
+---
+
+## 🗂️ 项目结构
+
+```
+scripts/
+├── mcp_server.py          # MCP Server 主入口（12 个工具，JSON-RPC over stdio）
+├── hybrid_search.py       # BM25 + RRF 混合检索（纯标准库，中文 bigram）
+├── semantic_search.py     # FAISS 向量检索
+├── dual_memory_engine.py  # 双记忆引擎（STM/LTM 协同，自动分类，语义蒸馏）
+├── memory_config.py       # 路径 + 模型配置（全环境变量可覆盖）
+├── memory_git.py          # Git 原生版本管理
+├── build_full_index.py    # 全量索引构建
+├── install_memory_mcp.py  # 跨 Agent 一键安装器（13 个 Agent）
+├── storage_tiers.py       # 热/温/冷三层存储
+├── memory_dedup.py        # 语义去重引擎
+├── plugin_bridge.py       # JSON CLI 桥接（Daemon 模式）
+└── memory_maintain.py     # 定时维护工具
+```
+
+---
+
+## 📄 License
+
+MIT License — 自由使用、修改、分发。
+
+---
+
+<div align="center">
+
+如果这个项目对你有帮助，请给个 ⭐ Star — 这是对持续维护的最大鼓励。
+
+</div>
