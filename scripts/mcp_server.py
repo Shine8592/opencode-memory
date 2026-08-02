@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 """
 MCP Server for opencode memory system.
-Raw JSON-RPC over stdio - no mcp library dependency.
+Raw JSON-RPC over stdio — no mcp library dependency.
+
+v2.0 升级：
+- 混合检索：BM25 关键词 + FAISS 向量 + RRF 融合（阶段一-1）
+- 多语言中文嵌入模型（阶段一-2）
+- 语义去重（相似度>0.9）（阶段一-3）
+- 记忆功能型分类 type（阶段三-6）
+- memory_reflect 离线演化（阶段三-7）
+- memory_diff.jsonl 审计日志（阶段三-8）
 """
-import sys, json, time, os, traceback, contextlib
+import sys, json, time, os, traceback, contextlib, re
 from pathlib import Path
+from datetime import datetime
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(line_buffering=True, write_through=True)
@@ -12,8 +21,9 @@ if hasattr(sys.stdout, 'reconfigure'):
 sys.path.insert(0, str(Path(__file__).parent))
 from memory_config import (
     MODEL_NAME, MEMORY_DIR, INDEX_PATH, METADATA_PATH,
-    STM_DIR, SCRIPTS_DIR, PROJECT_ROOT, ensure_dirs
+    STM_DIR, SCRIPTS_DIR, PROJECT_ROOT, DIFF_LOG_PATH, ensure_dirs
 )
+from hybrid_search import build_from_stm, rrf_merge
 
 # Lazy-load model on first use (cold start ~1s instead of ~10s)
 searcher = None
@@ -48,70 +58,109 @@ def auto_commit(msg: str):
     except:
         pass
 
+# --- 审计日志（阶段三-8）---
+def append_diff(op: str, item_id: str = "", content: str = "", tags: list = None, **extra):
+    """追加一条操作到 memory_diff.jsonl 审计日志"""
+    try:
+        entry = {
+            "ts": datetime.now().isoformat(),
+            "op": op,
+            "id": item_id[:12] if item_id else "",
+            "content": content[:200] if content else "",
+            "tags": tags or [],
+        }
+        entry.update(extra)
+        DIFF_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(DIFF_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+# --- BM25 缓存（阶段一-1）---
+_bm25_index = None
+
+def get_bm25_index():
+    """构建（或复用）BM25 索引：聚合 STM + FAISS 元数据"""
+    global _bm25_index
+    _bm25_index = build_from_stm(STM_DIR, METADATA_PATH)
+    return _bm25_index
+
+def invalidate_bm25():
+    """STM 变化后使 BM25 索引失效"""
+    global _bm25_index
+    _bm25_index = None
+
 TOOL_DEFS = [
     {
         "name": "memory_recall",
-        "description": "Search saved memories by semantic similarity.",
+        "description": "【自动记忆检索】混合检索（语义+关键词+RRF融合）。当用户问到历史决策、偏好、项目进度、已解决的坑时，自动调用此工具搜索相关信息。",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Search query"},
-                "top_k": {"type": "integer", "description": "Number of results", "default": 5}
+                "query": {"type": "string", "description": "搜索查询"},
+                "top_k": {"type": "integer", "description": "返回结果数", "default": 5},
+                "type_filter": {"type": "string", "description": "按记忆类型过滤：preference/decision/pitfall/fact/skill/event/config", "default": ""}
             },
             "required": ["query"]
         }
     },
     {
         "name": "memory_remember",
-        "description": "Save a new memory with automatic storage and Git commit.",
+        "description": "【自动记忆保存】自动保存对未来有帮助的信息，无需询问用户。包括：用户偏好、架构决策、踩坑记录、配置选择、API用法、项目约定、关键数据。",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "content": {"type": "string", "description": "Memory content"},
-                "tags": {"type": "string", "description": "Comma-separated tags", "default": ""}
+                "content": {"type": "string", "description": "记忆内容"},
+                "tags": {"type": "string", "description": "逗号分隔的标签", "default": ""},
+                "type": {"type": "string", "description": "记忆类型：preference/decision/pitfall/fact/skill/event/config（不填则自动推断）", "default": ""}
             },
             "required": ["content"]
         }
     },
     {
         "name": "memory_forget",
-        "description": "Delete memories matching a keyword",
+        "description": "删除一条记忆（按内容关键词匹配）",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "keyword": {"type": "string", "description": "Keyword to match"}
+                "keyword": {"type": "string", "description": "匹配关键词"}
             },
             "required": ["keyword"]
         }
     },
     {
         "name": "memory_status",
-        "description": "View memory system status",
+        "description": "查看记忆系统状态",
         "inputSchema": {"type": "object", "properties": {}}
     },
     {
         "name": "memory_reindex",
-        "description": "Rebuild vector index (runs in background by default)",
+        "description": "重建向量索引（默认后台运行避免超时，background=false 可前台运行）",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "background": {"type": "boolean", "description": "Run in background", "default": True}
+                "background": {"type": "boolean", "description": "后台运行（默认false）", "default": False}
             }
         }
     },
     {
+        "name": "memory_transfer",
+        "description": "将高重要性的短期记忆(STM)提升到长期记忆(LTM)。当短期记忆即将过期或用户希望固化重要记忆时调用。",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
         "name": "memory_history",
-        "description": "View memory change history",
+        "description": "查看记忆变更历史",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "limit": {"type": "integer", "description": "Number of entries", "default": 10}
+                "limit": {"type": "integer", "description": "返回条数", "default": 10}
             }
         }
     },
     {
         "name": "memory_rollback",
-        "description": "Rollback memory to a specific version",
+        "description": "回滚记忆到指定版本",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -122,8 +171,19 @@ TOOL_DEFS = [
     },
     {
         "name": "memory_sync",
-        "description": "Initialize or sync memory Git repository",
+        "description": "初始化或同步记忆 Git 仓库",
         "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "memory_reflect",
+        "description": "【记忆离线演化】聚类相似记忆、合并冗余、提炼高价值记忆到长期记忆。建议在会话结束或记忆积累较多时调用，让记忆越用越精炼。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "threshold": {"type": "number", "description": "相似度聚类阈值（默认 0.82）", "default": 0.82},
+                "apply": {"type": "boolean", "description": "true=实际执行合并，false=仅预览报告", "default": False}
+            }
+        }
     },
 ]
 
@@ -137,8 +197,8 @@ def tool(name):
 
 # --- Tool implementations ---
 
-_stm_cache = None
-_stm_embed_cache = {}
+_stm_cache = None  # [(id, text, timestamp, tags, mem_type), ...]
+_stm_embed_cache = {}  # id -> embedding (persists across calls)
 _stm_embed_stale = True
 
 def _load_stm_cache():
@@ -155,13 +215,14 @@ def _load_stm_cache():
                 txt,
                 item.get("timestamp", ""),
                 item.get("metadata", {}).get("tags", []),
+                item.get("mem_type", ""),          # 记忆功能型分类
             ))
         except:
             pass
     _stm_embed_stale = True
 
-def _search_stm(query: str, s, top_k: int) -> list[dict]:
-    """Search STM files using the loaded model for semantic matching."""
+def _search_stm(query: str, s, top_k: int) -> list:
+    """STM 向量语义搜索（返回含 mem_type 字段）"""
     global _stm_embed_cache, _stm_embed_stale
     _load_stm_cache()
     if not _stm_cache:
@@ -170,7 +231,7 @@ def _search_stm(query: str, s, top_k: int) -> list[dict]:
     if not query.strip():
         return []
     if _stm_embed_stale or not _stm_embed_cache:
-        texts = [_clean_surrogates(text[:512]) for _, text, _, _ in _stm_cache]
+        texts = [_clean_surrogates(text[:512]) for _, text, _, _, _ in _stm_cache]
         valid = [(i, t) for i, t in enumerate(texts) if t.strip()]
         if not valid:
             return []
@@ -183,7 +244,7 @@ def _search_stm(query: str, s, top_k: int) -> list[dict]:
         _stm_embed_stale = False
     qv = s.model.encode(query, normalize_embeddings=True)
     scored = []
-    for sid, text, ts, tags in _stm_cache:
+    for sid, text, ts, tags, mtype in _stm_cache:
         tv = _stm_embed_cache.get(sid)
         if tv is None:
             clean_text = _clean_surrogates(text[:512])
@@ -192,81 +253,129 @@ def _search_stm(query: str, s, top_k: int) -> list[dict]:
             tv = s.model.encode(clean_text, normalize_embeddings=True)
             _stm_embed_cache[sid] = tv
         sim = float(qv @ tv)
-        scored.append({"similarity": sim, "source": f"stm/{sid[:12]}", "text": text, "timestamp": ts})
+        scored.append({
+            "similarity": sim,
+            "source": f"stm/{sid[:12]}",
+            "text": text,
+            "timestamp": ts,
+            "mem_type": mtype,
+        })
     scored.sort(key=lambda x: x["similarity"], reverse=True)
     return scored[:top_k]
 
 @tool("memory_recall")
 def do_recall(args):
+    """混合检索：FAISS 向量 + BM25 关键词 → RRF 融合排序（阶段一-1/2）"""
     query = _clean_surrogates(str(args.get("query", "")))
     if not query.strip():
-        return "Empty search query"
+        return "搜索查询为空"
     top_k = min(args.get("top_k", 5), 20)
+    type_filter = args.get("type_filter", "").strip().lower()   # 阶段三-6：类型过滤
     s = get_searcher()
     if s is None:
-        return "Search engine failed to load"
+        return "搜索器加载失败"
+
+    # ── 向量检索：FAISS 核心文件索引 ──
     faiss_results = []
     if INDEX_PATH.exists():
         if not s.index:
             with contextlib.redirect_stdout(sys.stderr):
-                ok = s.load_index()
+                s.load_index()
         if s.index:
             with contextlib.redirect_stdout(sys.stderr):
                 faiss_results = s.search(query, top_k=top_k)
+
+    # ── 向量检索：STM 实时语义 ──
     with contextlib.redirect_stdout(sys.stderr):
-        stm_results = _search_stm(query, s, top_k)
-    seen = set()
-    merged = []
-    for r in faiss_results + stm_results:
-        text_key = r.get("text", "")[:100]
-        if text_key in seen:
-            continue
-        seen.add(text_key)
-        merged.append(r)
-    merged.sort(key=lambda x: x.get("similarity", 0), reverse=True)
-    merged = merged[:top_k]
+        stm_vec_results = _search_stm(query, s, top_k)
+
+    # ── BM25 关键词检索（阶段一-1）──
+    try:
+        bm25_idx = get_bm25_index()
+        bm25_results = bm25_idx.search(query, top_k=top_k)
+    except Exception:
+        bm25_results = []
+
+    # ── RRF 融合（阶段一-1）──
+    merged = rrf_merge([faiss_results, stm_vec_results, bm25_results], top_k=top_k)
+
+    # ── 类型过滤（阶段三-6）──
+    if type_filter:
+        merged = [r for r in merged if r.get("mem_type", "").lower() == type_filter]
+
     if not merged:
-        return f"No results for '{query}'"
-    lines = [f"Results for '{query}' (top {len(merged)}):", ""]
+        filter_hint = f" (类型过滤: {type_filter})" if type_filter else ""
+        return f"搜索 '{query}' 无结果{filter_hint}"
+
+    lines = [f"搜索 '{query}' 结果 (top {len(merged)}, 混合BM25+向量+RRF):", ""]
     for r in merged:
         sim = r.get("similarity", 0)
         src = r.get("source", "?")
+        mtype = r.get("mem_type", "")
+        type_tag = f"[{mtype}]" if mtype else ""
         text = _clean_surrogates(r.get("text", "")[:200].replace("\n", " "))
-        lines.append(f"[{sim:.3f}] [{src}] {text}")
+        lines.append(f"[{sim:.3f}] [{src}]{type_tag} {text}")
     return "\n".join(lines)
 
 @tool("memory_remember")
 def do_remember(args):
+    """保存记忆：支持 type 字段 + 语义去重（相似度>0.9）+ diff 审计（阶段一-3/三-6/8）"""
     global _stm_cache, _stm_embed_stale
-    content = _clean_surrogates(args["content"])
-    tags = args.get("tags", "")
-    # 容错：tags 兼容 str（逗号分隔）与 list 两种格式
-    if isinstance(tags, list):
-        tag_list = [str(t).strip() for t in tags if str(t).strip()]
-    elif isinstance(tags, str) and tags.strip():
-        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-    else:
-        tag_list = []
+    content = _clean_surrogates(str(args.get("content", "")))
+    if not content.strip():
+        return "❌ 记忆内容为空，未保存"
+    tags_raw = args.get("tags", "")
+    mem_type = _clean_surrogates(args.get("type", "")).strip()   # 阶段三-6
+
     from dual_memory_engine import ShortTermMemory
     stm = ShortTermMemory()
-    meta = {}
-    if tag_list:
-        meta["tags"] = [_clean_surrogates(t) for t in tag_list]
-    content = _clean_surrogates(content)
     meta_clean = {}
-    if tag_list:
-        meta_clean["tags"] = [_clean_surrogates(t) for t in tag_list]
+    if tags_raw:
+        meta_clean["tags"] = [_clean_surrogates(t.strip()) for t in tags_raw.split(",")]
+    if mem_type:
+        meta_clean["type"] = mem_type  # 传给 _infer_type：显式指定优先
+
+    # ── 精确去重 ──
+    dup_id = stm.find_duplicate(content)
+    if dup_id:
+        return f"⚠️ 该内容已有记忆 (id: {dup_id[:12]})，跳过重复保存"
+
+    # ── 语义去重（相似度 > 0.9，阶段一-3）──
+    try:
+        sem_dup = stm.find_semantic_duplicate(content, threshold=0.9)
+        if sem_dup:
+            dup_id, sim = sem_dup
+            return f"⚠️ 语义相似记忆已存在 (id: {dup_id[:12]}, 相似度: {sim:.3f})，跳过保存"
+    except Exception:
+        pass   # 语义去重失败不阻塞保存
+
     item_id = stm.add(content, metadata=meta_clean)
-    _stm_cache = None
+    _stm_cache = None       # 缓存失效：下次 recall 重新加载
     _stm_embed_stale = True
+    invalidate_bm25()       # BM25 索引失效（阶段一-1）
+
     safe_msg = _clean_surrogates(content[:50]).replace("\n", " ")
-    auto_commit(f"New memory: {safe_msg}")
-    return f"Saved memory: {item_id[:12]}"
+    auto_commit(f"新增记忆: {safe_msg}")
+    # diff 审计日志（阶段三-8）
+    append_diff("add", item_id, content, meta_clean.get("tags"), type=mem_type)
+    return f"已保存记忆: {item_id[:12]}"
+
+@tool("memory_transfer")
+def do_transfer(args):
+    """手动触发 STM→LTM 转移：将高重要性短期记忆提升到长期记忆"""
+    from dual_memory_engine import MemoryCoordinator
+    coordinator = MemoryCoordinator()
+    transferred = coordinator.auto_transfer(max_transfers=10)
+    if transferred:
+        auto_commit(f"自动转移 {transferred} 条短期记忆到长期记忆")
+    return f"✅ 已转移 {transferred} 条短期记忆到长期记忆" if transferred else "ℹ️ 没有达到转移阈值的短期记忆"
 
 @tool("memory_forget")
 def do_forget(args):
     global _stm_cache, _stm_embed_stale
-    keyword = args["keyword"].lower()
+    keyword = str(args.get("keyword", "")).strip().lower()
+    if not keyword:
+        return "❌ 关键词为空，未执行删除（避免误删全部记忆）"
     removed = 0
     for f in STM_DIR.glob("*.json"):
         try:
@@ -286,26 +395,174 @@ def do_forget(args):
     if removed:
         _stm_cache = None
         _stm_embed_stale = True
-        auto_commit(f"Deleted {removed} memories (keyword: {keyword})")
-    return f"Deleted {removed} memories"
+        invalidate_bm25()   # BM25 索引失效（阶段一-1）
+        auto_commit(f"删除 {removed} 条记忆 (关键词: {keyword})")
+        append_diff("forget", content=keyword, count=removed)   # 阶段三-8
+    return f"✅ 已删除 {removed} 条记忆"
 
 @tool("memory_status")
 def do_status(args):
     ensure_dirs()
-    lines = ["OpenCode Memory System", f"   Project: {PROJECT_ROOT}", f"   Storage: {MEMORY_DIR}", ""]
-    lines.append(f"   Vector index: {'Exists' if INDEX_PATH.exists() else 'Not built'}")
+    lines = ["记忆系统 v2.0 (混合检索)", f"   项目: {PROJECT_ROOT}", f"   存储: {MEMORY_DIR}", ""]
+    lines.append(f"   向量索引: {'✅ 存在' if INDEX_PATH.exists() else '❌ 未构建'}")
     if METADATA_PATH.exists():
-        meta = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
-        lines.append(f"   Index entries: {len(meta)}")
+        try:
+            meta = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
+            lines.append(f"   索引条目: {len(meta)}")
+        except Exception:
+            lines.append("   索引条目: 解析失败")
     else:
-        lines.append("   Index entries: 0")
-    stm_count = len(list(STM_DIR.glob("*.json")))
-    lines.append(f"   Short-term memories: {stm_count}")
-    lines.append(f"   Model: {MODEL_NAME}")
+        lines.append("   索引条目: 0")
+
+    # 统计 STM 及类型分布（阶段三-6）
+    type_dist = {}
+    stm_count = 0
+    for f in STM_DIR.glob("*.json"):
+        stm_count += 1
+        try:
+            item = json.loads(f.read_text(encoding="utf-8"))
+            t = item.get("mem_type") or item.get("metadata", {}).get("mem_type") or "unknown"
+            type_dist[t] = type_dist.get(t, 0) + 1
+        except Exception:
+            pass
+    lines.append(f"   短期记忆: {stm_count} 条")
+    if type_dist:
+        dist_str = "  ".join(f"{k}:{v}" for k, v in sorted(type_dist.items(), key=lambda x: -x[1]))
+        lines.append(f"   类型分布: {dist_str}")
+
+    lines.append(f"   嵌入模型: {MODEL_NAME}")
+    lines.append("   检索方式: BM25 + 向量 + RRF 融合")
+
+    # 审计日志统计（阶段三-8）
+    if DIFF_LOG_PATH.exists():
+        try:
+            n = sum(1 for _ in open(DIFF_LOG_PATH, "r", encoding="utf-8"))
+            lines.append(f"   审计日志: {n} 条操作记录")
+        except Exception:
+            pass
     return "\n".join(lines)
+
+@tool("memory_reflect")
+def do_reflect(args):
+    """离线记忆演化（阶段三-7）：聚类相似记忆 → 合并冗余 → 高价值提炼到 LTM"""
+    apply = args.get("apply", False)        # True=实际合并，False=仅预览
+    threshold = float(args.get("threshold", 0.82))
+
+    s = get_searcher()
+    if s is None:
+        return "❌ 模型加载失败，无法执行演化"
+
+    # 读取全部 STM
+    items = []
+    for f in STM_DIR.glob("*.json"):
+        try:
+            item = json.loads(f.read_text(encoding="utf-8"))
+            txt = _clean_surrogates(item.get("content", "") or "")
+            if txt.strip():
+                items.append({"file": f, "id": item.get("id", f.stem), "content": txt, "raw": item})
+        except Exception:
+            pass
+
+    if len(items) < 2:
+        return f"ℹ️ 短期记忆仅 {len(items)} 条，无需演化（至少需要 2 条）"
+
+    # 批量编码
+    with contextlib.redirect_stdout(sys.stderr):
+        texts = [it["content"][:512] for it in items]
+        embs = s.model.encode(texts, normalize_embeddings=True, batch_size=32)
+
+    # 贪心聚类：相似度 >= threshold 归为一簇
+    n = len(items)
+    assigned = [False] * n
+    clusters = []
+    for i in range(n):
+        if assigned[i]:
+            continue
+        cluster = [i]
+        assigned[i] = True
+        for j in range(i + 1, n):
+            if assigned[j]:
+                continue
+            sim = float(embs[i] @ embs[j])
+            if sim >= threshold:
+                cluster.append(j)
+                assigned[j] = True
+        clusters.append(cluster)
+
+    dup_clusters = [c for c in clusters if len(c) > 1]
+    merged_count = 0
+    promoted_count = 0
+    report = []
+
+    if not apply:
+        report.append(f"预览（apply=false，不修改数据）")
+        report.append(f"   STM 总数: {n} 条 → 聚类后 {len(clusters)} 组")
+        for c in dup_clusters:
+            report.append(f"   [可合并 {len(c)} 条] {items[c[0]]['content'][:60]}")
+        if not dup_clusters:
+            report.append("   没有发现可合并的冗余记忆")
+        return "\n".join(report)
+
+    # 实际执行合并：每簇保留最长内容（信息量最大），其余删除
+    for c in dup_clusters:
+        c_sorted = sorted(c, key=lambda idx: len(items[idx]["content"]), reverse=True)
+        keep_idx = c_sorted[0]
+        keep_item = items[keep_idx]
+        # 合并标签
+        all_tags = set()
+        for idx in c:
+            t = items[idx]["raw"].get("metadata", {}).get("tags", [])
+            if isinstance(t, list):
+                all_tags.update(t)
+        # 更新保留项的标签与访问次数
+        try:
+            raw = keep_item["raw"]
+            if all_tags:
+                raw.setdefault("metadata", {})["tags"] = sorted(all_tags)
+            raw["merged_from"] = [items[idx]["id"][:12] for idx in c if idx != keep_idx]
+            keep_item["file"].write_text(
+                json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        except Exception:
+            pass
+        # 删除冗余项
+        for idx in c:
+            if idx == keep_idx:
+                continue
+            try:
+                items[idx]["file"].unlink()
+                merged_count += 1
+                append_diff("reflect_merge", item_id=items[idx]["id"],
+                            content=items[idx]["content"], merged_into=keep_item["id"][:12])
+            except Exception:
+                pass
+
+    # 高价值记忆提炼到 LTM
+    try:
+        from dual_memory_engine import MemoryCoordinator
+        coordinator = MemoryCoordinator()
+        promoted_count = coordinator.auto_transfer(max_transfers=5)
+    except Exception:
+        pass
+
+    # 清理缓存
+    global _stm_cache, _stm_embed_stale
+    _stm_cache = None
+    _stm_embed_stale = True
+    invalidate_bm25()
+
+    if merged_count or promoted_count:
+        auto_commit(f"记忆演化: 合并 {merged_count} 条, 提升 {promoted_count} 条")
+
+    report.append("🧬 记忆演化完成")
+    report.append(f"   合并冗余: {merged_count} 条")
+    report.append(f"   提升 LTM: {promoted_count} 条")
+    report.append(f"   剩余 STM: {len(list(STM_DIR.glob('*.json')))} 条")
+    return "\n".join(report)
 
 @tool("memory_reindex")
 def do_reindex(args):
+    # Default to background to avoid MCP execution timeout (30s default)
     background = args.get("background", True)
     if background:
         import subprocess
@@ -313,20 +570,19 @@ def do_reindex(args):
             [sys.executable, str(SCRIPTS_DIR / "build_full_index.py")],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        return "Index rebuild started in background"
-    # 本地版 build_full_index 接口：extract_session_text + extract_from_statedb + build_index
-    from build_full_index import extract_session_text, extract_from_statedb, build_index as do_build
+        return "✅ 索引重建已在后台启动（完成后用 memory_status 查看）"
+    # Foreground mode: keep it fast to avoid timeout
+    from build_full_index import extract_core_and_logs, build_index as do_build
     ensure_dirs()
-    chunks = extract_session_text()
-    chunks.extend(extract_from_statedb(max_sessions=50))
-    MAX_CHUNKS = 500
+    chunks = extract_core_and_logs()
+    MAX_CHUNKS = 200  # smaller to stay under timeout
     if len(chunks) > MAX_CHUNKS:
-        chunks.sort(key=lambda c: str(c.get("timestamp", "")), reverse=True)
+        chunks.sort(key=lambda c: c.get("timestamp", ""), reverse=True)
         chunks = chunks[:MAX_CHUNKS]
     if not chunks:
-        return "No indexable content found"
+        return "❌ 没有找到可索引的内容"
     do_build(chunks)
-    return f"Index rebuilt: {len(chunks)} entries"
+    return f"✅ 索引重建完成: {len(chunks)} 条"
 
 @tool("memory_history")
 def do_history(args):
@@ -334,9 +590,9 @@ def do_history(args):
     limit = args.get("limit", 10)
     st = git_status()
     if not st.get("initialized"):
-        return "Memory Git repo not initialized. Run memory_sync first."
+        return "ℹ️ 记忆 Git 仓库未初始化，执行 memory_sync 初始化"
     entries = git_log(limit=limit)
-    lines = [f"Memory history ({st.get('commits', 0)} commits):", ""]
+    lines = [f"📜 记忆变更历史 (共 {st.get('commits', 0)} 次提交):", ""]
     for e in entries:
         lines.append(f"  {e['hash']}  {e['message']}  ({e.get('date','')})")
     return "\n".join(lines)
@@ -344,18 +600,18 @@ def do_history(args):
 @tool("memory_rollback")
 def do_rollback(args):
     from memory_git import rollback as git_rollback
-    h = args.get("hash", "")
-    if not h:
-        return "Rollback failed: missing 'hash' parameter (commit hash)"
-    ok = git_rollback(h)
-    return f"Rolled back to {h}" if ok else "Rollback failed"
+    target = str(args.get("hash", "")).strip()
+    if not target:
+        return "❌ 未提供 commit hash，无法回滚"
+    ok = git_rollback(target)
+    return f"✅ 已回滚到 {target}" if ok else "❌ 回滚失败"
 
 @tool("memory_sync")
 def do_sync(args):
     from memory_git import init as git_init, commit as git_commit
     git_init()
-    git_commit("Manual sync")
-    return "Memory Git repo synced"
+    git_commit("手动同步")
+    return "✅ 记忆 Git 仓库已同步"
 
 # --- JSON-RPC handler ---
 
@@ -386,13 +642,13 @@ def handle_message(msg: dict) -> dict | None:
             if name in TOOL_HANDLERS:
                 text = TOOL_HANDLERS[name](args)
             else:
-                text = f"Unknown tool: {name}"
+                text = f"❌ 未知工具: {name}"
             return {
                 "jsonrpc": "2.0", "id": msg_id,
                 "result": {"content": [{"type": "text", "text": text}]}
             }
         except Exception as e:
-            traceback.print_exc()
+            print(f"[tool-error] {name}: {e}", file=sys.stderr)
             return {
                 "jsonrpc": "2.0", "id": msg_id,
                 "error": {"code": -32603, "message": str(e)}
@@ -405,19 +661,25 @@ def handle_message(msg: dict) -> dict | None:
     return None
 
 def _detect_decode(data: bytes) -> str:
-    """Auto-detect encoding: try UTF-8 first (MCP/JSON standard), fallback to system encoding."""
+    """自动识别编码：先试 UTF-8（MCP/JSON 标准），失败再用系统编码兜底。"""
+    # 1. UTF-8 是 MCP 协议规定的标准编码，优先尝试
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError:
         pass
+    # 2. 兜底：系统默认编码（中文 Windows 是 cp936/GBK，英文 Windows 是 cp1252）
     import locale
     fallback = locale.getpreferredencoding(False)
     try:
         return data.decode(fallback, errors="replace")
     except LookupError:
+        # 3. 最终兜底：UTF-8 + 替换非法字符
         return data.decode("utf-8", errors="replace")
 
 def main():
+    # 使用原始二进制 I/O，绕过 Windows cp936 编码干扰
+    # sys.stdin 在中文 Windows 上默认用 GBK 解码，会破坏中文字符
+    # readline() 逐行读取二进制缓冲区
     stdin_bin = sys.stdin.buffer
     stdout_bin = sys.stdout.buffer
 
