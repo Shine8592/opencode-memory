@@ -21,7 +21,8 @@ if hasattr(sys.stdout, 'reconfigure'):
 sys.path.insert(0, str(Path(__file__).parent))
 from memory_config import (
     MODEL_NAME, MEMORY_DIR, INDEX_PATH, METADATA_PATH,
-    STM_DIR, SCRIPTS_DIR, PROJECT_ROOT, DIFF_LOG_PATH, ensure_dirs
+    STM_DIR, SCRIPTS_DIR, PROJECT_ROOT, DIFF_LOG_PATH, ensure_dirs,
+    RERANKER_NAME, RERANKER_PATH, RERANK_ENABLED
 )
 from hybrid_search import build_from_stm, rrf_merge
 
@@ -91,6 +92,61 @@ def invalidate_bm25():
     """STM 变化后使 BM25 索引失效"""
     global _bm25_index
     _bm25_index = None
+
+# --- Cross-encoder 重排（v3.0 P0-2，借鉴 Hindsight SOTA 配方）---
+_reranker = None
+_reranker_failed = False   # 加载失败后不再重试，避免每次 recall 卡顿
+
+def get_reranker():
+    """惰性加载 Cross-encoder 精排模型；不可用时返回 None（优雅降级为纯 RRF）"""
+    global _reranker, _reranker_failed
+    if _reranker_failed:
+        return None
+    if _reranker is None:
+        try:
+            from sentence_transformers import CrossEncoder
+            from memory_config import RERANKER_NAME, RERANKER_PATH
+            with contextlib.redirect_stdout(sys.stderr):
+                if RERANKER_PATH.exists():
+                    _reranker = CrossEncoder(str(RERANKER_PATH))
+                else:
+                    os.environ.pop("TRANSFORMERS_OFFLINE", None)
+                    _reranker = CrossEncoder(RERANKER_NAME)
+                    try:
+                        RERANKER_PATH.parent.mkdir(parents=True, exist_ok=True)
+                        _reranker.save(str(RERANKER_PATH))
+                    except Exception:
+                        pass
+                    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        except Exception as e:
+            print(f"[reranker] 不可用，降级为纯 RRF: {e}", file=sys.stderr)
+            _reranker_failed = True
+            return None
+    return _reranker
+
+def rerank(query: str, results: list, top_k: int) -> list:
+    """Cross-encoder 精排：对 RRF 融合结果做 query-doc 对打分重排。
+    失败时原样返回（保证检索链路永不中断）。"""
+    if not results or len(results) < 2:
+        return results[:top_k]
+    ce = get_reranker()
+    if ce is None:
+        return results[:top_k]
+    try:
+        pairs = [(query, (r.get("text", "") or "")[:512]) for r in results]
+        with contextlib.redirect_stdout(sys.stderr):
+            scores = ce.predict(pairs, show_progress_bar=False)
+        order = sorted(range(len(results)), key=lambda i: -float(scores[i]))
+        out = []
+        for rank, i in enumerate(order[:top_k]):
+            item = dict(results[i])
+            item["rerank_score"] = round(float(scores[i]), 4)
+            item["reranked"] = True
+            out.append(item)
+        return out
+    except Exception as e:
+        print(f"[reranker] 打分失败，降级为纯 RRF: {e}", file=sys.stderr)
+        return results[:top_k]
 
 TOOL_DEFS = [
     {
@@ -175,6 +231,28 @@ TOOL_DEFS = [
         "name": "memory_sync",
         "description": "初始化或同步记忆 Git 仓库",
         "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "memory_session_save",
+        "description": "【会话快照】保存当前工作状态（正在编辑的文件、任务进度、关键决策）到快照，供下次会话 memory_prime 恢复使用。建议在会话结束时调用。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tasks": {"type": "string", "description": "正在进行的任务描述（换行分隔）"},
+                "files":  {"type": "string", "description": "涉及的关键文件路径（换行分隔）"},
+                "note":   {"type": "string", "description": "本次会话的核心结论/决策"}
+            }
+        }
+    },
+    {
+        "name": "memory_prime",
+        "description": "【会话启动上下文注入】一次调用获取全部关键上下文：用户偏好+踩坑教训+架构决策+高分记忆。建议在新会话开始时首先调用，替代多次 memory_recall。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "可选：当前任务描述，用于额外检索相关记忆", "default": ""}
+            }
+        }
     },
     {
         "name": "memory_reflect",
@@ -310,26 +388,32 @@ def do_recall(args):
         bm25_results = [r for r in bm25_results if _keep(r)]
 
     # ── RRF 融合（阶段一-1）──
-    merged = rrf_merge([faiss_results, stm_vec_results, bm25_results], top_k=top_k)
+    # 重排开启时多取候选，给 Cross-encoder 更大的精排空间
+    rrf_k = min(top_k * 3, 30) if RERANK_ENABLED else top_k
+    merged = rrf_merge([faiss_results, stm_vec_results, bm25_results], top_k=rrf_k)
 
     if not merged:
         filter_hint = f" (类型过滤: {type_filter})" if type_filter else ""
         return f"搜索 '{query}' 无结果{filter_hint}"
 
-    # 相关度显示：RRF 原始分很小(~0.03)易被误读，归一化为 0~1 相对分（BUG 修复）
-    max_score = max((r.get("similarity", 0) or 0) for r in merged) or 1.0
+    # ── Cross-encoder 重排（P0-2，借鉴 Hindsight SOTA 配方）──
+    merged = rerank(query, merged, top_k)
+    reranked = bool(merged and merged[0].get("reranked"))
 
-    # RRF 原始分很小（约 1/60），归一化到 0~1 便于阅读，避免被误读为"相关度3%"
-    raw_scores = [r.get("similarity", 0) or 0 for r in merged]
-    max_raw = max(raw_scores) if raw_scores else 1.0
-    if max_raw <= 0:
-        max_raw = 1.0
+    method_tag = "BM25+向量+RRF+CrossEncoder" if reranked else "BM25+向量+RRF"
+    # 归一化相对得分（0~1），基于 rerank_score 或 similarity
+    score_key = "rerank_score" if reranked else "similarity"
+    scores = [float(r.get(score_key, 0) or 0) for r in merged]
+    max_s = max(scores) if scores else 1.0
+    if max_s <= 0:
+        max_s = 1.0
 
-    lines = [f"搜索 '{query}' 结果 (top {len(merged)}, 混合BM25+向量+RRF):", ""]
+    lines = [f"搜索 '{query}' 结果 (top {len(merged)}, {method_tag}):", ""]
     for rank, r in enumerate(merged, 1):
-        norm = (r.get("similarity", 0) or 0) / max_raw      # 相对最佳命中的归一化得分
+        raw = float(r.get(score_key, 0) or 0)
+        norm = raw / max_s
         src = r.get("source", "?")
-        mtype = r.get("mem_type", "")
+        mtype = r.get("mem_type", "") or r.get("type", "")
         type_tag = f"[{mtype}]" if mtype else ""
         text = _clean_surrogates(r.get("text", "")[:200].replace("\n", " "))
         lines.append(f"#{rank} (relv {norm:.2f}) [{src}]{type_tag} {text}")
@@ -458,6 +542,96 @@ def do_status(args):
             lines.append(f"   审计日志: {n} 条操作记录")
         except Exception:
             pass
+    return "\n".join(lines)
+
+@tool("memory_prime")
+def do_prime(args):
+    """会话启动上下文注入（P0-1，借鉴 Beads bd prime）
+    一次返回：用户偏好 + 踩坑教训 + 架构决策 + 高分记忆 + 任务相关记忆"""
+    task_query = _clean_surrogates(str(args.get("query", ""))).strip()
+
+    # 读取全部 STM，按类型和重要性分组
+    by_type = {}
+    high_score = []
+    for f in STM_DIR.glob("*.json"):
+        try:
+            item = json.loads(f.read_text(encoding="utf-8"))
+            txt = _clean_surrogates(item.get("content", "") or "")
+            if not txt.strip():
+                continue
+            mtype = (item.get("mem_type") or "fact").lower()
+            score = float(item.get("importance_score", 0) or 0)
+            rec = {"text": txt, "score": score, "ts": item.get("timestamp", ""),
+                   "id": item.get("id", f.stem)}
+            by_type.setdefault(mtype, []).append(rec)
+            if score >= 0.7:
+                high_score.append(rec)
+        except Exception:
+            continue
+
+    def _top(lst, n):
+        return sorted(lst, key=lambda x: (-x["score"], x["ts"]), reverse=False)[:n]
+
+    lines = ["=" * 56, "记忆上下文注入 (memory_prime)", "=" * 56]
+
+    # 1. 用户偏好（最高优先级 —— 影响所有交互）
+    prefs = _top(by_type.get("preference", []), 3)
+    if prefs:
+        lines.append("")
+        lines.append("【用户偏好】")
+        for p in prefs:
+            lines.append(f"  - {p['text'][:150]}")
+
+    # 2. 踩坑教训（避免重复犯错）
+    pits = _top(by_type.get("pitfall", []), 3)
+    if pits:
+        lines.append("")
+        lines.append("【踩坑教训 - 避免重犯】")
+        for p in pits:
+            lines.append(f"  - {p['text'][:180]}")
+
+    # 3. 架构决策（保持一致性）
+    decs = _top(by_type.get("decision", []), 3)
+    if decs:
+        lines.append("")
+        lines.append("【架构决策 - 保持一致】")
+        for d in decs:
+            lines.append(f"  - {d['text'][:150]}")
+
+    # 4. 配置/技能类
+    cfgs = _top(by_type.get("config", []) + by_type.get("skill", []), 2)
+    if cfgs:
+        lines.append("")
+        lines.append("【配置与技能】")
+        for c in cfgs:
+            lines.append(f"  - {c['text'][:130]}")
+
+    # 5. 当前任务相关记忆（可选，走混合检索）
+    if task_query:
+        try:
+            hit_text = do_recall({"query": task_query, "top_k": 3})
+            if "无结果" not in hit_text:
+                lines.append("")
+                lines.append(f"【任务相关记忆: {task_query[:40]}】")
+                for ln in hit_text.split("\n"):
+                    if ln.startswith("#"):
+                        lines.append(f"  {ln}")
+        except Exception:
+            pass
+
+    # 6. 核心记忆文件提示
+    from memory_config import HERMES_DIR
+    core_present = [n for n in ("SOUL.md", "USER.md", "MEMORY.md", "AGENTS.md")
+                    if (HERMES_DIR / n).exists()]
+    lines.append("")
+    lines.append("-" * 56)
+    total = sum(len(v) for v in by_type.values())
+    dist = "  ".join(f"{k}:{len(v)}" for k, v in sorted(by_type.items(), key=lambda x: -len(x[1])))
+    lines.append(f"STM {total} 条 | {dist}")
+    if core_present:
+        lines.append(f"核心文件: {', '.join(core_present)}")
+    if not total:
+        lines.append("（记忆库为空，可用 memory_remember 开始积累）")
     return "\n".join(lines)
 
 @tool("memory_reflect")
@@ -623,6 +797,52 @@ def do_rollback(args):
         return "❌ 未提供 commit hash，无法回滚"
     ok = git_rollback(target)
     return f"✅ 已回滚到 {target}" if ok else "❌ 回滚失败"
+
+@tool("memory_session_save")
+def do_session_save(args):
+    """保存会话快照（P2-4，借鉴 Context Mode 5钩子思路）
+    不依赖 hook，让 Agent 在会话结束时主动调用以持久化工作状态。"""
+    tasks = _clean_surrogates(args.get("tasks", "")).strip()
+    files = _clean_surrogates(args.get("files", "")).strip()
+    note  = _clean_surrogates(args.get("note",  "")).strip()
+
+    if not (tasks or files or note):
+        return "❌ 未提供任何内容，快照为空"
+
+    from dual_memory_engine import ShortTermMemory
+    stm = ShortTermMemory()
+
+    saved = []
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # 工作状态记为高优先级记忆（下次 prime 时优先召回）
+    if tasks:
+        cid = stm.add(
+            f"[会话快照 {ts}] 任务进度:\n{tasks}",
+            metadata={"type": "event", "tags": ["session-snapshot", "in-progress"], "important": True}
+        )
+        saved.append(f"任务进度 → {cid[:8]}")
+    if files:
+        cid = stm.add(
+            f"[会话快照 {ts}] 关键文件:\n{files}",
+            metadata={"type": "event", "tags": ["session-snapshot", "files"], "important": True}
+        )
+        saved.append(f"文件列表 → {cid[:8]}")
+    if note:
+        cid = stm.add(
+            f"[会话快照 {ts}] 结论/决策:\n{note}",
+            metadata={"type": "decision", "tags": ["session-snapshot"], "important": True}
+        )
+        saved.append(f"结论决策 → {cid[:8]}")
+
+    global _stm_cache, _stm_embed_stale
+    _stm_cache = None
+    _stm_embed_stale = True
+    invalidate_bm25()
+    auto_commit(f"会话快照: {ts}")
+    append_diff("session_save", content=f"tasks={bool(tasks)},files={bool(files)},note={bool(note)}")
+    return f"✅ 会话快照已保存: {' | '.join(saved)}\n💡 下次会话开始时调用 memory_prime 可自动恢复"
 
 @tool("memory_sync")
 def do_sync(args):
