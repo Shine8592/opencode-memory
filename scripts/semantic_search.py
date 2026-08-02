@@ -46,7 +46,7 @@ class SemanticMemorySearch:
         self.model = None
         self.index = None
         self.metadata = []
-        self.dimension = 384  # all-MiniLM-L6-v2 output dimension
+        self.dimension = 384  # 默认值；load_model() 后更新为实际维度
         
     def load_model(self):
         """Load sentence transformer model from local cache only"""
@@ -74,6 +74,14 @@ class SemanticMemorySearch:
                     self.model = SentenceTransformer(str(legacy))
                 else:
                     raise
+
+        # 动态读取真实维度（换模型后不会因硬编码 384 崩溃）
+        try:
+            real_dim = self.model.get_sentence_embedding_dimension()
+            if real_dim:
+                self.dimension = int(real_dim)
+        except Exception:
+            pass
 
         elapsed = time.time() - start_time
         print(f"✅ Model loaded ({elapsed:.1f}s) dim={self.dimension} path={MODEL_PATH}")
