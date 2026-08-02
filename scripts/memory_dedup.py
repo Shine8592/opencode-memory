@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Semantic deduplication engine - prevents index bloat
+语义去重引擎 — 在索引入库前检查相似度，防止索引膨胀
 """
 import sys, json, hashlib
 from pathlib import Path
@@ -25,7 +25,7 @@ class DedupEngine:
             else:
                 self.model = SentenceTransformer(MODEL_NAME)
         except Exception as e:
-            print(f"  Dedup model load failed: {e}")
+            print(f"  ⚠ 去重模型加载失败: {e}")
 
     def get_embedding(self, text: str):
         if not self.model:
@@ -87,5 +87,5 @@ class DedupEngine:
                 skip += 1
                 existing.append({"text": text})
         if skip:
-            print(f"  Dedup filtered: {skip} (threshold {SIMILARITY_THRESHOLD})")
+            print(f"  🗑️ 去重过滤: {skip} 条 (阈值 {SIMILARITY_THRESHOLD})")
         return keep
