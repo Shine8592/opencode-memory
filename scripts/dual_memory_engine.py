@@ -47,82 +47,69 @@ class ShortTermMemory:
 
     def find_similar(self, content: str, model=None, threshold: float = 0.9) -> Optional[tuple]:
         """
-        语义去重（阶段一-3）：查找语义高度相似的记忆。
-        返回 (id, similarity) 或 None。model 为已加载的 SentenceTransformer。
-        无模型时退化为精确匹配。
+        语义去重（向后兼容封装）。实际逻辑统一由 find_semantic_duplicate 实现，
+        避免两份重复的相似度计算代码。保留此方法供外部旧调用方使用。
         """
-        safe = content.encode("utf-8", errors="replace").decode("utf-8").strip()
-        if not safe:
-            return None
-        # 无模型：退化为精确匹配
-        if model is None:
-            dup = self.find_duplicate(safe)
-            return (dup, 1.0) if dup else None
-        # 收集已有记忆
-        existing = []
-        for file_path in self.stm_dir.glob("*.json"):
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    item = json.load(f)
-                txt = (item.get("content", "") or "").strip()
-                if txt:
-                    existing.append((item.get("id", file_path.stem), txt))
-            except Exception:
-                continue
-        if not existing:
-            return None
-        try:
-            qv = model.encode(safe[:512], normalize_embeddings=True)
-            texts = [t[:512] for _, t in existing]
-            embs = model.encode(texts, normalize_embeddings=True, batch_size=32)
-            best_id, best_sim = None, 0.0
-            for (eid, _), ev in zip(existing, embs):
-                sim = float(qv @ ev)
-                if sim > best_sim:
-                    best_id, best_sim = eid, sim
-            if best_sim >= threshold:
-                return (best_id, round(best_sim, 4))
-        except Exception:
-            # 编码失败则退化精确匹配
-            dup = self.find_duplicate(safe)
-            return (dup, 1.0) if dup else None
-        return None
+        return self.find_semantic_duplicate(content, threshold=threshold, model=model)
 
-    def find_semantic_duplicate(self, content: str, threshold: float = 0.9) -> Optional[tuple]:
-        """语义去重：与已有 STM 计算向量相似度，返回 (id, similarity)；无则 None。
-        不加载模型时返回 None（依赖调用方已加载模型）。"""
+    def find_semantic_duplicate(self, content: str, threshold: float = 0.9,
+                                model=None) -> Optional[tuple]:
+        """语义去重（BUG修复版）：批量编码 + 复用全局 searcher 模型，而非逐条+二次加载。
+        model: 可传入已加载的 SentenceTransformer 以复用（推荐）。
+        返回 (id, similarity) 或 None。"""
         try:
             from sentence_transformers import SentenceTransformer
             import numpy as np
         except ImportError:
             return None
-        # 复用全局缓存模型（避免重复加载）
-        model = getattr(self, "_dup_model", None)
+
+        # 1. 优先复用全局 searcher 已加载的模型（避免二次 465MB 加载）
+        try:
+            import sys, importlib
+            mcp_globals = sys.modules.get("__main__")
+            if mcp_globals and hasattr(mcp_globals, "searcher") and mcp_globals.searcher:
+                model = mcp_globals.searcher.model
+        except Exception:
+            pass
+
+        # 2. 回退：按需加载（缓存在实例上，仅加载一次）
+        if model is None:
+            model = getattr(self, "_dup_model", None)
         if model is None:
             from memory_config import MODEL_PATH, MODEL_NAME
             cache = MODEL_PATH
-            if cache.exists():
-                model = SentenceTransformer(str(cache))
-            else:
-                model = SentenceTransformer(MODEL_NAME)
-            self._dup_model = model
-        qv = model.encode([content[:512]], normalize_embeddings=True)[0]
-        best = None
-        for file_path in self.stm_dir.glob("*.json"):
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    item = json.load(f)
-                txt = item.get("content", "")[:512]
-                if not txt.strip():
-                    continue
-                tv = model.encode([txt], normalize_embeddings=True)[0]
-                sim = float(np.dot(qv, tv))
-                if sim >= threshold:
-                    if best is None or sim > best[1]:
-                        best = (item.get("id"), sim)
+                model = SentenceTransformer(str(cache) if cache.exists() else MODEL_NAME)
+            except Exception:
+                return None
+            self._dup_model = model
+
+        # 3. 收集现有 STM（一次 IO）
+        existing = []
+        for fp in self.stm_dir.glob("*.json"):
+            try:
+                item = json.load(open(fp, encoding="utf-8"))
+                txt = (item.get("content", "") or "").strip()
+                if txt:
+                    existing.append((item.get("id", fp.stem), txt))
             except Exception:
                 continue
-        return best
+        if not existing:
+            return None
+
+        # 4. 批量编码（一次模型调用，而非 N 次）
+        try:
+            qv = model.encode(content[:512], normalize_embeddings=True)
+            texts = [t[:512] for _, t in existing]
+            embs = model.encode(texts, normalize_embeddings=True, batch_size=32)
+            sims = embs @ qv
+            best_idx = int(np.argmax(sims))
+            best_sim = float(sims[best_idx])
+            if best_sim >= threshold:
+                return (existing[best_idx][0], round(best_sim, 4))
+        except Exception:
+            pass
+        return None
 
     def _calc_initial_importance(self, content: str, metadata: Optional[Dict]) -> float:
         """计算新记忆的初始重要性分数（0~1）"""
