@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Git auto-versioning for memory directory
+Git 自动版本管理 — 记忆目录变更自动 commit，可 rollback
 """
 import subprocess, json, time
 from pathlib import Path
@@ -32,7 +32,8 @@ def init():
         if not gitignore.exists():
             gitignore.write_text("semantic_model/\n__pycache__/\n*.pyc\n", encoding="utf-8")
         _run_git("add", "-A")
-        _run_git("commit", "-m", "Memory repo initialized", "--allow-empty")
+        _run_git("commit", "-m", "🎬 记忆仓库初始化", "--allow-empty")
+        print(f"  📦 记忆 Git 仓库已初始化: {MEMORY_DIR}")
 
 def commit(message: str = ""):
     if not GIT_DIR.exists():
@@ -41,7 +42,7 @@ def commit(message: str = ""):
     status = _run_git("status", "--porcelain")
     if not status:
         return
-    msg = message or f"Memory update {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    msg = message or f"🔄 记忆更新 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     _run_git("commit", "-m", msg)
 
 def log(limit: int = 10) -> list:
@@ -59,7 +60,7 @@ def rollback(hash: str):
     if not GIT_DIR.exists():
         return False
     _run_git("restore", "--source", hash, "--", ".")
-    commit(f"Rolled back to {hash}")
+    commit(f"⏪ 回滚到 {hash}")
     return True
 
 def status() -> dict:
