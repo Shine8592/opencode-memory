@@ -80,9 +80,11 @@ def append_diff(op: str, item_id: str = "", content: str = "", tags: list = None
 _bm25_index = None
 
 def get_bm25_index():
-    """构建（或复用）BM25 索引：聚合 STM + FAISS 元数据"""
+    """构建（或复用）BM25 索引：聚合 STM + FAISS 元数据
+    修复：缓存复用，仅在 invalidate_bm25() 后才重建（原先每次 recall 全量重建）"""
     global _bm25_index
-    _bm25_index = build_from_stm(STM_DIR, METADATA_PATH)
+    if _bm25_index is None:
+        _bm25_index = build_from_stm(STM_DIR, METADATA_PATH)
     return _bm25_index
 
 def invalidate_bm25():
@@ -275,6 +277,9 @@ def do_recall(args):
     if s is None:
         return "搜索器加载失败"
 
+    # 有类型过滤时扩大候选池，避免过滤后为空（BUG 修复）
+    fetch_k = top_k * 5 if type_filter else top_k
+
     # ── 向量检索：FAISS 核心文件索引 ──
     faiss_results = []
     if INDEX_PATH.exists():
@@ -283,38 +288,51 @@ def do_recall(args):
                 s.load_index()
         if s.index:
             with contextlib.redirect_stdout(sys.stderr):
-                faiss_results = s.search(query, top_k=top_k)
+                faiss_results = s.search(query, top_k=fetch_k)
 
     # ── 向量检索：STM 实时语义 ──
     with contextlib.redirect_stdout(sys.stderr):
-        stm_vec_results = _search_stm(query, s, top_k)
+        stm_vec_results = _search_stm(query, s, fetch_k)
 
     # ── BM25 关键词检索（阶段一-1）──
     try:
         bm25_idx = get_bm25_index()
-        bm25_results = bm25_idx.search(query, top_k=top_k)
+        bm25_results = bm25_idx.search(query, top_k=fetch_k)
     except Exception:
         bm25_results = []
 
+    # ── 类型过滤：在融合前过滤各路结果（BUG 修复：先过滤再截断）──
+    if type_filter:
+        def _keep(r):
+            return (r.get("mem_type", "") or r.get("type", "")).lower() == type_filter
+        faiss_results = [r for r in faiss_results if _keep(r)]
+        stm_vec_results = [r for r in stm_vec_results if _keep(r)]
+        bm25_results = [r for r in bm25_results if _keep(r)]
+
     # ── RRF 融合（阶段一-1）──
     merged = rrf_merge([faiss_results, stm_vec_results, bm25_results], top_k=top_k)
-
-    # ── 类型过滤（阶段三-6）──
-    if type_filter:
-        merged = [r for r in merged if r.get("mem_type", "").lower() == type_filter]
 
     if not merged:
         filter_hint = f" (类型过滤: {type_filter})" if type_filter else ""
         return f"搜索 '{query}' 无结果{filter_hint}"
 
+    # 相关度显示：RRF 原始分很小(~0.03)易被误读，归一化为 0~1 相对分（BUG 修复）
+    max_score = max((r.get("similarity", 0) or 0) for r in merged) or 1.0
+
+    # RRF 原始分很小（约 1/60），归一化到 0~1 便于阅读，避免被误读为"相关度3%"
+    raw_scores = [r.get("similarity", 0) or 0 for r in merged]
+    max_raw = max(raw_scores) if raw_scores else 1.0
+    if max_raw <= 0:
+        max_raw = 1.0
+
     lines = [f"搜索 '{query}' 结果 (top {len(merged)}, 混合BM25+向量+RRF):", ""]
-    for r in merged:
-        sim = r.get("similarity", 0)
+    for rank, r in enumerate(merged, 1):
+        norm = (r.get("similarity", 0) or 0) / max_raw      # 相对最佳命中的归一化得分
         src = r.get("source", "?")
         mtype = r.get("mem_type", "")
         type_tag = f"[{mtype}]" if mtype else ""
         text = _clean_surrogates(r.get("text", "")[:200].replace("\n", " "))
-        lines.append(f"[{sim:.3f}] [{src}]{type_tag} {text}")
+        lines.append(f"#{rank} (relv {norm:.2f}) [{src}]{type_tag} {text}")
     return "\n".join(lines)
 
 @tool("memory_remember")
