@@ -404,14 +404,19 @@ def do_recall(args):
     # 归一化相对得分（0~1），基于 rerank_score 或 similarity
     score_key = "rerank_score" if reranked else "similarity"
     scores = [float(r.get(score_key, 0) or 0) for r in merged]
-    max_s = max(scores) if scores else 1.0
-    if max_s <= 0:
-        max_s = 1.0
+    # min-max 归一化：Cross-encoder 输出 logits 可为负，直接除以最大值会产生
+    # 负相关度（如 -2.14）误导用户。改为线性映射到 0~1 区间。
+    if scores:
+        s_min, s_max = min(scores), max(scores)
+        s_span = s_max - s_min
+    else:
+        s_min, s_span = 0.0, 0.0
 
     lines = [f"搜索 '{query}' 结果 (top {len(merged)}, {method_tag}):", ""]
     for rank, r in enumerate(merged, 1):
         raw = float(r.get(score_key, 0) or 0)
-        norm = raw / max_s
+        # 全部同分时统一显示 1.00，否则按 min-max 映射
+        norm = 1.0 if s_span <= 1e-9 else (raw - s_min) / s_span
         src = r.get("source", "?")
         mtype = r.get("mem_type", "") or r.get("type", "")
         type_tag = f"[{mtype}]" if mtype else ""
