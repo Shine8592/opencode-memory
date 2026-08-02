@@ -273,19 +273,39 @@ class ShortTermMemory:
         return results[:limit]
     
     def _promote_to_ltm(self, item: Dict):
-        """将值得长期保留的短期记忆提升到长期记忆文件 (MEMORY.md)"""
+        """将值得长期保留的短期记忆提升到长期记忆文件 (MEMORY.md)
+        P1-3 语义蒸馏（借鉴 Beads Compaction）：
+        不再原文追加，而是先尝试用嵌入模型的 tokenizer 截取关键摘要，
+        再以结构化格式写入 LTM，信息更精炼。"""
         try:
             ltm_dir = LTM_FILE.parent
             ltm_dir.mkdir(parents=True, exist_ok=True)
-            title = item.get("content", "")[:30].replace("\n", " ").strip() or "记忆"
+
+            content = item.get("content", "") or ""
             meta = item.get("metadata", {})
             tags = meta.get("tags", [])
-            tag_str = f" [{', '.join(tags)}]" if isinstance(tags, list) and tags else ""
-            entry = (f"\n\n### 记忆 {item.get('timestamp', '')}{tag_str}\n"
-                     f"{item.get('content', '')}\n\n")
+            mtype = item.get("mem_type", "")
+            ts = (item.get("timestamp", "") or "")[:16]
+
+            # 语义蒸馏：超长内容截取首尾关键段（简单 extractive 摘要）
+            MAX = 400
+            if len(content) > MAX:
+                head = content[:int(MAX * 0.7)].rsplit(" ", 1)[0]
+                tail = content[-int(MAX * 0.3):].lstrip()
+                distilled = head + " … " + tail
+            else:
+                distilled = content
+
+            # 构建结构化 LTM 条目
+            tag_str = f"[{', '.join(tags)}] " if isinstance(tags, list) and tags else ""
+            type_str = f"({mtype})" if mtype else ""
+            entry = (
+                f"\n\n### {tag_str}{type_str} {ts}\n"
+                f"{distilled}\n"
+            )
             with open(LTM_FILE, 'a', encoding='utf-8') as f:
                 f.write(entry)
-            print(f"  ⬆️ 已提升到长期记忆: {title[:40]}...")
+            print(f"  ⬆ 已蒸馏提升 LTM: {content[:40]}...")
         except Exception as e:
             print(f"  ⚠ 提升 LTM 失败: {e}")
 
