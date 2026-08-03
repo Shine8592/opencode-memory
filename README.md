@@ -1,4 +1,6 @@
-# 🧠 OpenCode Memory — 下一代 AI 编程 Agent 记忆系统
+# 🧠 Universal Agent Memory — 下一代 AI Agent 通用记忆系统
+
+> **原名 `opencode-memory`，已升级为跨 Agent 通用记忆系统。** 适用于任何 AI 编程助手 / Agent：OpenCode、Claude Code、Cursor、Windsurf、Codex、Kiro、Zed、Continue、Cline、Roo Code、Gemini CLI、VS Code Copilot、Trae 等。
 
 <div align="center">
 
@@ -18,11 +20,11 @@
 
 ---
 
-## ✨ 为什么选择 OpenCode Memory？
+## ✨ 为什么选择 Universal Agent Memory？
 
-市面上的 AI 记忆系统要么需要托管云服务和 API Key，要么需要运行 Neo4j + Qdrant 双数据库，要么只支持英文。**OpenCode Memory** 的设计原则是：**纯本地、纯 Python、零外部服务、中英文同等流畅**。
+市面上的 AI 记忆系统要么需要托管云服务和 API Key，要么需要运行 Neo4j + Qdrant 双数据库，要么只支持英文。**Universal Agent Memory** 的设计原则是：**纯本地、纯 Python、零外部服务、中英文同等流畅、Agent 无关**。
 
-| 对比项 | OpenCode Memory | mem0 | cognee | letta |
+| 对比项 | Universal Agent Memory | mem0 | cognee | letta |
 |--------|-----------------|------|--------|-------|
 | 完全离线 | ✅ 无需任何 API Key | ❌ 需 OpenAI Key | ❌ 需 LLM API | ❌ 需 LLM API |
 | 单进程部署 | ✅ 纯 Python 单文件 | ✅ | ❌ 需 Neo4j/Qdrant | ❌ 需数据库 |
@@ -136,8 +138,8 @@ memory_reflect(apply=True, threshold=0.82)
 ### 方式一：一键安装到任意 Agent（推荐）
 
 ```bash
-git clone https://github.com/Shine8592/opencode-memory
-cd opencode-memory
+git clone https://github.com/Shine8592/universal-agent-memory
+cd universal-agent-memory
 
 pip install -r requirements.txt
 
@@ -354,6 +356,29 @@ scripts/
 ├── plugin_bridge.py       # JSON CLI 桥接（Daemon 模式）
 └── memory_maintain.py     # 定时维护工具
 ```
+
+---
+
+## 🧬 演进历史
+
+本项目由作者多年迭代而来，当前为**唯一维护的主项目**（v3.0+）。历史过渡仓库均已归档：
+
+```
+skill-memory-logic (2026-04)  → 最早的规则日志版
+      ↓
+SuperMemo-Du (2026-04)        → 双记忆引擎 + 三层存储
+      ↓
+super-memory-hermes-v1 (2026-05) → 语义向量记忆版（含已归档的 hermes-memory-system）
+      ↓
+universal-agent-memory (2026-07) → 当前主项目：MCP 架构 + 混合检索 + 跨 Agent 安装
+```
+
+| 历史仓库 | 状态 | 说明 |
+|----------|------|------|
+| [skill-memory-logic](https://github.com/Shine8592/skill-memory-logic) | 🗄️ 已归档 | 记忆逻辑管理技能（5 条铁律） |
+| [SuperMemo-Du](https://github.com/Shine8592/SuperMemo-Du) | 🗄️ 已归档 | 双记忆协同引擎 |
+| [super-memory-hermes-v1](https://github.com/Shine8592/super-memory-hermes-v1) | 🗄️ 已归档 | Hermes 语义向量记忆 V1 |
+| [hermes-memory-system](https://github.com/Shine8592/hermes-memory-system) | 🗄️ 已归档 | Hermes 记忆系统原型 |
 
 ---
 
