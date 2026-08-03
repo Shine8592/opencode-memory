@@ -61,7 +61,8 @@ resp = run([
 cold_start = time.time() - t0
 check("Cold start", cold_start < 5, f"{cold_start:.1f}s")
 check("Init response", len(resp) >= 2 and "result" in resp[0])
-check("8 tools listed", len(resp) >= 2 and "result" in resp[1] and len(resp[1]["result"]["tools"]) == 8)
+tools = resp[1]["result"]["tools"] if len(resp) >= 2 and "result" in resp[1] else []
+check("Tools listed (>=12)", len(tools) >= 12, f"{len(tools)} tools")
 
 # === 2. Status ===
 say("\n-- 2. Memory Status --")
@@ -140,8 +141,10 @@ check("Unknown tool returns error", len(resp) >= 2 and "error" in resp[-1])
 # === 6. Model Integrity ===
 say("\n-- 6. Model Check --")
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
-model_path = Path(r"E:\工作类\研发\.opencode\memory\semantic_model")
-check("Model path exists", model_path.exists())
+sys.path.insert(0, str(Path(__file__).parent))
+from memory_config import MODEL_PATH
+model_path = MODEL_PATH
+check("Model path exists", model_path.exists(), str(model_path))
 if model_path.exists():
     from sentence_transformers import SentenceTransformer
     t0 = time.time()
