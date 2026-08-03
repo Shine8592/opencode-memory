@@ -26,11 +26,11 @@ def _run_git(*args, cwd=None) -> str:
 def init():
     if not GIT_DIR.exists():
         _run_git("init")
-        _run_git("config", "user.name", "opencode-memory")
-        _run_git("config", "user.email", "memory@opencode.local")
+        _run_git("config", "user.name", "universal-agent-memory")
+        _run_git("config", "user.email", "memory@universal-agent-memory.local")
         gitignore = MEMORY_DIR / ".gitignore"
         if not gitignore.exists():
-            gitignore.write_text("semantic_model/\n__pycache__/\n*.pyc\n", encoding="utf-8")
+            gitignore.write_text("models/\n__pycache__/\n*.pyc\n", encoding="utf-8")
         _run_git("add", "-A")
         _run_git("commit", "-m", "🎬 记忆仓库初始化", "--allow-empty")
         print(f"  📦 记忆 Git 仓库已初始化: {MEMORY_DIR}")
