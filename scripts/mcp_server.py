@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from memory_config import (
     MODEL_NAME, MEMORY_DIR, INDEX_PATH, METADATA_PATH,
     STM_DIR, SCRIPTS_DIR, PROJECT_ROOT, DIFF_LOG_PATH, ensure_dirs,
-    RERANKER_NAME, RERANKER_PATH, RERANK_ENABLED
+    RERANK_ENABLED
 )
 from hybrid_search import build_from_stm, rrf_merge
 
@@ -874,7 +874,7 @@ def handle_message(msg: dict) -> dict | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"experimental": {}, "tools": {"listChanged": False}},
-                "serverInfo": {"name": "opencode-memory", "version": "1.0.0"}
+                "serverInfo": {"name": "universal-agent-memory", "version": "3.0.0"}
             }
         }
     elif method == "notifications/initialized":
@@ -887,10 +887,13 @@ def handle_message(msg: dict) -> dict | None:
         name = params.get("name", "")
         args = params.get("arguments", {})
         try:
-            if name in TOOL_HANDLERS:
-                text = TOOL_HANDLERS[name](args)
-            else:
-                text = f"❌ 未知工具: {name}"
+            if name not in TOOL_HANDLERS:
+                # 协议合规：未知工具返回 JSON-RPC error（-32602 Invalid params）
+                return {
+                    "jsonrpc": "2.0", "id": msg_id,
+                    "error": {"code": -32602, "message": f"Unknown tool: {name}"}
+                }
+            text = TOOL_HANDLERS[name](args)
             return {
                 "jsonrpc": "2.0", "id": msg_id,
                 "result": {"content": [{"type": "text", "text": text}]}
@@ -930,6 +933,16 @@ def main():
     # readline() 逐行读取二进制缓冲区
     stdin_bin = sys.stdin.buffer
     stdout_bin = sys.stdout.buffer
+
+    # 关键：将文本层 stdout 重定向到 stderr。
+    # 被调用的引擎模块（dual_memory_engine 等）内部有 print() 调试输出，
+    # 若直接打到 stdout 会污染 MCP JSON-RPC 协议流（客户端逐行解析 JSON 时崩溃）。
+    # JSON 响应仍走上面捕获的 stdout_bin（二进制缓冲，不受重定向影响）。
+    if sys.stderr is not None:
+        try:
+            sys.stdout = sys.stderr
+        except Exception:
+            pass
 
     while True:
         try:
