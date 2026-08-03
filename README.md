@@ -382,12 +382,16 @@ universal-agent-memory (2026-07) → 当前主项目：MCP 架构 + 混合检索
 
 ### 📌 版本归档（Releases）
 
-本项目遵循 **本地迭代 → 验证 → 发布 GitHub 最新 → 旧版本归档** 的开发原则。`main` 分支始终为最新可安装版本，历史版本通过 [Releases](https://github.com/Shine8592/universal-agent-memory/releases) + Tag 归档沉淀，方便后续者查看完整演化过程：
+本项目遵循 **本地迭代 → 验证 → 发布 GitHub 最新 → 旧版本归档** 的开发原则。`main` 分支始终为最新可安装版本，历史版本通过 [Releases](https://github.com/Shine8592/universal-agent-memory/releases) + Tag 归档沉淀，方便后续者查看完整演化过程。
+
+版本命名规则：主版本按代际递增（v1 → v2 → v3），小版本迭代用 `vX.Y` / `vX.Y.Z` 格式归档（如 v1.1、v2.2）。
 
 | 版本 | 说明 |
 |------|------|
 | [v3.0.1](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.1) | **当前最新**：修复迭代（GBK/emoji 崩溃、MCP stdout 协议流污染、清理旧模型引用） |
 | [v3.0.0](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.0) | 首个 v3.0 快照：更名 universal-agent-memory 后的完整实现 |
+| [v2.0](https://github.com/Shine8592/universal-agent-memory/releases/tag/v2.0) | 语义向量记忆版（Hermes V1 演进）：混合检索 BM25+RRF+CrossEncoder，对应 [super-memory-hermes-v1](https://github.com/Shine8592/super-memory-hermes-v1) |
+| [v1.0](https://github.com/Shine8592/universal-agent-memory/releases/tag/v1.0) | 规则逻辑记忆 + 双记忆引擎阶段，对应 [skill-memory-logic](https://github.com/Shine8592/skill-memory-logic) / [SuperMemo-Du](https://github.com/Shine8592/SuperMemo-Du) |
 
 ---
 
