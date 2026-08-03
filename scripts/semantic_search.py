@@ -35,8 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from memory_config import (
     MODEL_NAME, MEMORY_DIR, HERMES_DIR, INDEX_PATH, METADATA_PATH,
     MODEL_PATH, DAILY_DIR, CORE_FILES, ensure_dirs, SCRIPTS_DIR,
-    PROJECT_ROOT, write_index_safe, read_index_safe,
-    get_opencode_global
+    PROJECT_ROOT, write_index_safe, read_index_safe
 )
 
 class SemanticMemorySearch:
@@ -59,21 +58,12 @@ class SemanticMemorySearch:
         if model_cache.exists():
             self.model = SentenceTransformer(str(model_cache))
         else:
-            # 未缓存：尝试在线下载（若离线则回退旧模型目录）
-            try:
-                os.environ.pop("TRANSFORMERS_OFFLINE", None)
-                self.model = SentenceTransformer(MODEL_NAME)
-                model_cache.mkdir(parents=True, exist_ok=True)
-                self.model.save(str(model_cache))
-                os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-            except Exception as e:
-                # 回退：使用旧 semantic_model 目录（all-MiniLM-L6-v2）
-                legacy = get_opencode_global() / "semantic_model"
-                if legacy.exists():
-                    print(f"  ⚠ 新模型 {MODEL_NAME} 不可用，回退旧模型: {e}")
-                    self.model = SentenceTransformer(str(legacy))
-                else:
-                    raise
+            # 未缓存：尝试在线下载（离线时抛错，由调用方处理）
+            os.environ.pop("TRANSFORMERS_OFFLINE", None)
+            self.model = SentenceTransformer(MODEL_NAME)
+            model_cache.mkdir(parents=True, exist_ok=True)
+            self.model.save(str(model_cache))
+            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
         # 动态读取真实维度（换模型后不会因硬编码 384 崩溃）
         try:
