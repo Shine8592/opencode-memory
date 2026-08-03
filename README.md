@@ -1,10 +1,10 @@
-# 🧠 Universal Agent Memory — 下一代 AI Agent 通用记忆系统
+﻿# 🧠 Universal Agent Memory — 下一代 AI Agent 通用记忆系统
 
 > **原名 `opencode-memory`，已升级为跨 Agent 通用记忆系统。** 适用于任何 AI 编程助手 / Agent：OpenCode、Claude Code、Cursor、Windsurf、Codex、Kiro、Zed、Continue、Cline、Roo Code、Gemini CLI、VS Code Copilot、Trae 等。
 
 <div align="center">
 
-![version](https://img.shields.io/badge/version-3.0-blue)
+![version](https://img.shields.io/badge/version-3.0.1-blue)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-green)
 ![MCP](https://img.shields.io/badge/Protocol-MCP%20JSON--RPC-orange)
 ![Agents](https://img.shields.io/badge/Agents-13%2B-purple)
@@ -379,6 +379,15 @@ universal-agent-memory (2026-07) → 当前主项目：MCP 架构 + 混合检索
 | [SuperMemo-Du](https://github.com/Shine8592/SuperMemo-Du) | 🗄️ 已归档 | 双记忆协同引擎 |
 | [super-memory-hermes-v1](https://github.com/Shine8592/super-memory-hermes-v1) | 🗄️ 已归档 | Hermes 语义向量记忆 V1 |
 | [hermes-memory-system](https://github.com/Shine8592/hermes-memory-system) | 🗄️ 已归档 | Hermes 记忆系统原型 |
+
+### 📌 版本归档（Releases）
+
+本项目遵循 **本地迭代 → 验证 → 发布 GitHub 最新 → 旧版本归档** 的开发原则。`main` 分支始终为最新可安装版本，历史版本通过 [Releases](https://github.com/Shine8592/universal-agent-memory/releases) + Tag 归档沉淀，方便后续者查看完整演化过程：
+
+| 版本 | 说明 |
+|------|------|
+| [v3.0.1](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.1) | **当前最新**：修复迭代（GBK/emoji 崩溃、MCP stdout 协议流污染、清理旧模型引用） |
+| [v3.0.0](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.0) | 首个 v3.0 快照：更名 universal-agent-memory 后的完整实现 |
 
 ---
 
