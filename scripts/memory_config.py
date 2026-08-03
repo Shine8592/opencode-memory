@@ -37,22 +37,11 @@ SCRIPTS_DIR = get_scripts_dir()
 INDEX_PATH = MEMORY_DIR / "semantic_index.faiss"
 METADATA_PATH = MEMORY_DIR / "semantic_metadata.json"
 
-# 嵌入模型：支持 MEMORY_MODEL_NAME 覆盖，智能默认：优先多语言（已下载），否则回退旧模型
-_ML_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"   # 优先：中英文效果均佳
-_EN_MODEL  = "all-MiniLM-L6-v2"                        # 回退：仅英文，但已下载
+# 嵌入模型：支持 MEMORY_MODEL_NAME 覆盖，默认多语言模型（中英文效果均佳）
+_ML_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 
 def _choose_default_model() -> str:
-    """自动选最佳已缓存模型：有多语言缓存用多语言，否则回退旧英文模型（已下载不阻塞）"""
-    global_dir = get_opencode_global()
-    # 新缓存路径（models/）是否有多语言模型
-    ml_cache = global_dir / "models" / _ML_MODEL.replace("/", "_").replace(":", "_")
-    if ml_cache.exists():
-        return _ML_MODEL
-    # 旧路径（semantic_model/）是否有英文模型
-    legacy = global_dir / "semantic_model"
-    if legacy.exists():
-        return _EN_MODEL
-    # 均未下载 → 默认多语言（首次 recall 时按需下载）
+    """默认多语言模型；本地未缓存时首次加载按需下载"""
     return _ML_MODEL
 
 DEFAULT_MODEL = _ML_MODEL
