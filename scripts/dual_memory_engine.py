@@ -15,6 +15,15 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
+# Windows GBK 控制台下 emoji 打印会抛 UnicodeEncodeError，先重配置为 UTF-8
+try:
+    if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 sys.path.insert(0, str(Path(__file__).parent))
 from memory_config import (
     MEMORY_DIR, STM_DIR, LTM_FILE, COORDINATOR_FILE,
