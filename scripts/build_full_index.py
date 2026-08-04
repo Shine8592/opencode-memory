@@ -18,10 +18,10 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8", 
 
 sys.path.insert(0, str(Path(__file__).parent))
 from memory_config import (
-    MODEL_NAME, MODEL_PATH, HERMES_DIR,
+    MODEL_NAME, MODEL_PATH, MEMORY_DIR, HERMES_DIR, SCRIPTS_DIR,
     INDEX_PATH, METADATA_PATH, CORE_FILES, DAILY_DIR,
     MAX_CHUNK_CHARS, ensure_dirs, PROJECT_ROOT,
-    write_index_safe
+    write_index_safe, get_opencode_global
 )
 
 def extract_core_and_logs():
@@ -64,8 +64,39 @@ def extract_core_and_logs():
             except Exception as e:
                 print(f"  ⚠ {fpath.name}: {e}")
 
+    # --- 【补充】读取 MCP 记忆系统各目录（STM/short_term/scenarios/atoms/personas） ---
+    for sub in ["stm", "short_term", "scenarios", "archived", "personas", "atoms"]:
+        d = MEMORY_DIR / sub
+        if not d.exists():
+            continue
+        for fpath in sorted(d.glob("*")):
+            if not fpath.is_file():
+                continue
+            try:
+                if fpath.suffix == ".json":
+                    data = json.loads(fpath.read_text(encoding='utf-8'))
+                    if isinstance(data, dict) and data.get("content"):
+                        text = str(data["content"]).strip()
+                    elif isinstance(data, list):
+                        text = json.dumps(data, ensure_ascii=False)[:MAX_CHUNK_CHARS]
+                    else:
+                        continue
+                else:
+                    text = fpath.read_text(encoding='utf-8').strip()
+                if len(text) > 20:
+                    chunks.append({
+                        "id": f"{sub}/{fpath.name}",
+                        "text": text[:MAX_CHUNK_CHARS],
+                        "source": f"{sub}/{fpath.name}",
+                        "type": "memory_" + sub,
+                        "timestamp": fpath.stat().st_mtime
+                    })
+            except Exception as e:
+                print(f"  ⚠ {sub}/{fpath.name}: {e}")
+
     print(f"  核心记忆: {sum(1 for c in chunks if c['type']=='core_memory')} 块")
     print(f"  日志: {sum(1 for c in chunks if c['type']=='daily_log')} 条")
+    print(f"  MCP记忆: {sum(1 for c in chunks if c['type'].startswith('memory_'))} 条")
     return chunks
 
 def build_index(chunks):
@@ -77,11 +108,19 @@ def build_index(chunks):
     if MODEL_PATH.exists():
         model = SentenceTransformer(str(MODEL_PATH))
     else:
-        os.environ.pop("TRANSFORMERS_OFFLINE", None)
-        model = SentenceTransformer(MODEL_NAME)
-        MODEL_PATH.mkdir(parents=True, exist_ok=True)
-        model.save(str(MODEL_PATH))
-        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        try:
+            os.environ.pop("TRANSFORMERS_OFFLINE", None)
+            model = SentenceTransformer(MODEL_NAME)
+            MODEL_PATH.mkdir(parents=True, exist_ok=True)
+            model.save(str(MODEL_PATH))
+            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        except Exception as e:
+            legacy = get_opencode_global() / "semantic_model"
+            if legacy.exists():
+                print(f"  ⚠ 新模型不可用，回退旧模型: {e}")
+                model = SentenceTransformer(str(legacy))
+            else:
+                raise
 
     texts = [c["text"] for c in chunks]
     if not texts:
