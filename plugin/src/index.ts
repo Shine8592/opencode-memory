@@ -151,7 +151,7 @@ export const MemoryPlugin: Plugin = async ({ directory }) => {
         async execute(args) {
           const resp = await bridgeCmd("pitfalls", { limit: parseInt(args.limit || "10") })
           if (!resp.ok) return `查询失败: ${resp.error}`
-          const items = resp.items as STM[]
+          const items = resp.items as STMItem[]
           if (!items?.length) return "暂无踩坑记录"
           return items.map((item, i) =>
             `  ${i + 1}. ${item.content.slice(0, 300)}`
@@ -167,7 +167,7 @@ export const MemoryPlugin: Plugin = async ({ directory }) => {
         // 1. Inject pitfall memories first (most important)
         const pitResp = await bridgeCmd("pitfalls", { limit: 3 })
         if (pitResp.ok) {
-          const pits = pitResp.items as STM[]
+          const pits = pitResp.items as STMItem[]
           if (pits?.length) {
             parts.push("## 历史踩坑教训（避免重犯）")
             pits.forEach((p, i) => {
@@ -179,7 +179,7 @@ export const MemoryPlugin: Plugin = async ({ directory }) => {
         // 2. Inject recent general memories
         const memResp = await bridgeCmd("recent", { limit: 3 })
         if (memResp.ok) {
-          const items = memResp.items as STM[]
+          const items = memResp.items as STMItem[]
           if (items?.length) {
             parts.push("## 近期记忆")
             items.forEach((item, i) => {
