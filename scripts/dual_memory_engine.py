@@ -575,9 +575,21 @@ class MemoryCoordinator:
         transfers = []
         
         for item in stm_items:
-            importance = self.calculate_importance(item)
-            item["importance_score"] = importance
-            
+            # 优先使用已存的重要性分数（来自 _calc_initial_importance），
+            # 缺失时才用 calculate_importance 重算，避免重算公式覆盖已存高分
+            importance = item.get("importance_score")
+            if importance is None:
+                importance = self.calculate_importance(item)
+                item["importance_score"] = importance
+
+            # 用户显式标记 important / user_marked 的记直接提升到阈值
+            meta = item.get("metadata", {})
+            if meta.get("important") or meta.get("user_marked"):
+                threshold = self.state["importance_threshold"]
+                if importance < threshold:
+                    importance = threshold
+                    item["importance_score"] = importance
+
             # 如果超过重要性阈值，建议转移
             if importance >= self.state["importance_threshold"]:
                 transfers.append(item)

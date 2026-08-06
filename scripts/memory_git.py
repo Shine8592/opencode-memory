@@ -57,9 +57,21 @@ def log(limit: int = 10) -> list:
     return lines
 
 def rollback(hash: str):
+    """回滚到指定版本。校验 git restore 是否成功（无效 hash 不产生垃圾 commit）。
+    BUG修复: 旧实现用 _run_git 丢弃 returncode，无效 hash 时仍返回 True 并产生无意义 commit。
+    """
     if not GIT_DIR.exists():
         return False
-    _run_git("restore", "--source", hash, "--", ".")
+    try:
+        r = subprocess.run(
+            ["git", "restore", "--source", hash, "--", "."],
+            capture_output=True, timeout=30,
+            cwd=str(MEMORY_DIR), encoding="utf-8", errors="replace"
+        )
+        if r.returncode != 0:
+            return False
+    except Exception:
+        return False
     commit(f"⏪ 回滚到 {hash}")
     return True
 
