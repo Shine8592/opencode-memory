@@ -6,9 +6,10 @@ import json, sqlite3, pathlib, datetime, sys, uuid
 #   "role": "assistant" | "user"
 #   "content": "..."
 #   "metadata": {optional extra info}
-# It will insert a log record into ~/.hermes/memory/memory.db
+# It will insert a log record into the universal-agent-memory SQLite DB.
 
-DB_PATH = pathlib.Path('~/.hermes/memory/memory.db').expanduser()
+# 统一遵循 universal-agent-memory 官方路径约定：~/.config/opencode/memory
+DB_PATH = pathlib.Path('~/.config/opencode/memory/memory.db').expanduser()
 
 def insert_log(entry):
     conn = sqlite3.connect(str(DB_PATH))

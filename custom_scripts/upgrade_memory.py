@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import sqlite3, pathlib, json, datetime, uuid, sys
 
-DB_PATH = pathlib.Path('~/.hermes/memory/memory.db').expanduser()
-MEMORY_MD = pathlib.Path('~/.hermes/MEMORY.md').expanduser()
+# 统一遵循 universal-agent-memory 官方路径约定：~/.config/opencode/memory
+DB_PATH = pathlib.Path('~/.config/opencode/memory/memory.db').expanduser()
+MEMORY_MD = pathlib.Path('~/.config/opencode/memory/MEMORY.md').expanduser()
 
 def calc_importance(item):
     score = 0.0

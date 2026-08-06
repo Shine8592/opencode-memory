@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Backup the Hermes SQLite memory database daily
-DB_PATH="$HOME/.hermes/memory/memory.db"
+# Backup the Universal Agent Memory SQLite database daily
+DB_PATH="$HOME/.config/opencode/memory/memory.db"
 BACKUP_DIR="$HOME/sqlite_backups"
 mkdir -p "$BACKUP_DIR"
 DATE=$(date +%F)

@@ -2,19 +2,22 @@
 # Backup SQLite memory DB, email it, and push to remote GitHub repo.
 
 # ---- Configuration ----
-DB_PATH="$HOME/.hermes/memory/memory.db"
-BACKUP_ROOT="$HOME/hermes_backup"
+# 记忆存储路径统一遵循 universal-agent-memory 官方约定：
+#   全局脚本目录    ~/.config/opencode/memory/scripts
+#   记忆存储目录    ~/.config/opencode/memory/
+DB_PATH="$HOME/.config/opencode/memory/memory.db"
+BACKUP_ROOT="$HOME/universal_agent_memory_backup"
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 ARCHIVE_NAME="memory_backup_${TIMESTAMP}.tar.gz"
 ARCHIVE_PATH="$BACKUP_ROOT/$ARCHIVE_NAME"
 
 # Email settings (Himalaya)
 RECIPIENT="${BACKUP_EMAIL:-your-email@example.com}"
-EMAIL_SUBJECT="Hermes Memory Backup ${TIMESTAMP}"
+EMAIL_SUBJECT="Universal Agent Memory Backup ${TIMESTAMP}"
 EMAIL_BODY="Attached is the SQLite memory backup for ${TIMESTAMP}."
 
-# GitHub settings
-GIT_REPO="${BACKUP_REPO:-https://github.com/Shine8592/hermes-backup.git}"
+# GitHub settings（备份仓独立于主仓）
+GIT_REPO="${BACKUP_REPO:-https://github.com/Shine8592/universal-agent-memory-backup.git}"
 GIT_BRANCH="main"
 GITHUB_TOKEN="<GITHUB_TOKEN>"
 
@@ -50,8 +53,8 @@ if [ ! -d ".git" ]; then
   git remote add origin "$GIT_REPO"
 fi
 # Configure git to use token for authentication
-git config user.name "HermesBackupBot"
-git config user.email "bot@hermes.local"
+git config user.name "UniversalAgentMemoryBackupBot"
+git config user.email "bot@universal-agent-memory.local"
 # Add archive and commit
 git add "$ARCHIVE_NAME"
 git commit -m "Backup $TIMESTAMP"

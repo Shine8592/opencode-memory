@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import json, uuid, pathlib, sys
 
-STM_DIR = pathlib.Path('~/.hermes/memory/stm').expanduser()
-MERMAID_PATH = pathlib.Path('~/.hermes/memory/short_term/mermaid.md').expanduser()
+# 统一遵循 universal-agent-memory 官方路径约定：~/.config/opencode/memory
+STM_DIR = pathlib.Path('~/.config/opencode/memory/stm').expanduser()
+MERMAID_PATH = pathlib.Path('~/.config/opencode/memory/short_term/mermaid.md').expanduser()
 
 def load_atoms():
     atoms = []
@@ -21,7 +22,7 @@ def build_mermaid(atoms):
     lines = ['graph LR']
     prev = None
     for a in atoms:
-        safe = a['summary'].replace('"', '\\"')
+        safe = a['summary'].replace('"', '\"')
         node = f"{a['uid']}[\"{safe}\"]"
         lines.append(f"  {node}")
         if prev:
