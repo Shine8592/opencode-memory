@@ -1,0 +1,32 @@
+# 超级记忆系统配置文件模板
+# 复制此文件为 config.yaml 并填写你的配置
+
+api_keys:
+  tavily: "YOUR_TAVILY_API_KEY"  # 用于联网检索补充记忆（可选）
+
+memory:
+  # STM 短期记忆配置
+  stm:
+    max_items: 1000       # 最大条目数
+    max_age_hours: 24     # 过期时间（小时）
+
+  # LTM 长期记忆配置
+  ltm:
+    file: "MEMORY.md"     # 长期记忆文件
+
+  # 自动转移配置
+  transfer:
+    enabled: true         # 是否启用自动转移
+    threshold: 0.7        # 转移阈值（0-1）
+
+  # 三层存储
+  storage:
+    hot_max_size: 1000    # 热存储最大条目
+    warm_ttl_days: 30     # 温存储过期天数
+    cold_enabled: true    # 是否启用冷存储归档
+
+  # 索引
+  index:
+    model: "all-MiniLM-L6-v2"   # 嵌入模型
+    auto_rebuild: true          # 每日自动重建
+    rebuild_time: "03:00"       # 重建时间
