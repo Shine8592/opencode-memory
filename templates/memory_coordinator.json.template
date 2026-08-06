@@ -1,0 +1,13 @@
+{
+  "auto_transfer_enabled": true,
+  "stm_max_items": 1000,
+  "stm_max_age_hours": 24,
+  "transfer_threshold": 0.7,
+  "created_at": "",
+  "last_transfer": null,
+  "stats": {
+    "stm_count": 0,
+    "ltm_sections": 0,
+    "promoted_count": 0
+  }
+}
