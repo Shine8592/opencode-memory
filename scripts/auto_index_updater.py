@@ -8,6 +8,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Optional
+
 import time
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -29,7 +30,7 @@ class AutoIndexUpdater:
         """获取所有记忆文件的最后修改时间"""
         mtimes = {}
 
-        from memory_config import HERMES_DIR, CORE_FILES, DAILY_DIR
+        from memory_config import HERMES_DIR, CORE_FILES, DAILY_DIR, STM_DIR
         for filename in CORE_FILES:
             file_path = HERMES_DIR / filename
             if file_path.exists():
@@ -37,6 +38,12 @@ class AutoIndexUpdater:
 
         if DAILY_DIR.exists():
             for file_path in DAILY_DIR.glob("*.md"):
+                mtimes[str(file_path)] = file_path.stat().st_mtime
+
+        # 修复：STM 短期记忆是索引的重要数据源，必须纳入检测，
+        # 否则新增/修改 STM 记忆时 needs_update() 永远返回 False，索引不会自动重建
+        if STM_DIR.exists():
+            for file_path in STM_DIR.glob("*.json"):
                 mtimes[str(file_path)] = file_path.stat().st_mtime
 
         return mtimes
@@ -96,21 +103,24 @@ class AutoIndexUpdater:
         start_time = time.time()
         
         try:
-            # 构建新索引
-            success = self.searcher.build_index()
-            
-            if success:
-                # 保存更新记录
-                current_mtimes = self.get_memory_files_mtime()
-                self.save_last_update(current_mtimes)
-                
-                elapsed = time.time() - start_time
-                print(f"\n✅ 索引更新完成! 耗时: {elapsed:.1f}s")
-                print(f"   更新时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-                return True
-            else:
-                print("\n❌ 索引更新失败!")
+            # 修复：改用 build_full_index 的权威构建流程（含 STM/short_term/scenarios/atoms 扫描）。
+            # 旧实现 self.searcher.build_index() 只构建 CORE_FILES + daily 日志，
+            # STM 短期记忆永远不进索引，导致语义检索长期缺最新记忆。
+            from build_full_index import extract_core_and_logs, build_index as do_build
+            chunks = extract_core_and_logs()
+            if not chunks:
+                print("❌ 没有可索引的内容")
                 return False
+            do_build(chunks)
+
+            # 保存更新记录
+            current_mtimes = self.get_memory_files_mtime()
+            self.save_last_update(current_mtimes)
+            
+            elapsed = time.time() - start_time
+            print(f"\n✅ 索引更新完成! 共 {len(chunks)} 块, 耗时: {elapsed:.1f}s")
+            print(f"   更新时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            return True
                 
         except Exception as e:
             print(f"\n❌ 更新过程中出错: {e}")
