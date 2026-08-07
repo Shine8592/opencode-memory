@@ -4,12 +4,10 @@
 当记忆文件修改时自动重建语义索引
 """
 
-import os
 import sys
 import json
-import hashlib
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 import time
 
 sys.path.insert(0, str(Path(__file__).parent))

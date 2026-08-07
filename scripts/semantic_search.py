@@ -9,12 +9,11 @@ import sys
 import json
 import hashlib
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict
 import time
 
 import numpy as np
 
-import faiss
 # Check for required packages
 try:
     from sentence_transformers import SentenceTransformer
@@ -25,6 +24,7 @@ except ImportError:
     print("Please install: pip install sentence-transformers")
     sys.exit(1)
 
+# faiss 统一在 try/except 中导入，避免顶层 import 失败直接崩溃
 try:
     import faiss
     FAISS_AVAILABLE = True

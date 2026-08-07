@@ -65,6 +65,7 @@ def extract_core_and_logs():
                 print(f"  ⚠ {fpath.name}: {e}")
 
     # --- 【补充】读取 MCP 记忆系统各目录（STM/short_term/scenarios/atoms/personas） ---
+    # 修复：此前只扫核心文件 + daily 日志，STM 真实记忆从不进索引，语义检索长期不完整
     for sub in ["stm", "short_term", "scenarios", "archived", "personas", "atoms"]:
         d = MEMORY_DIR / sub
         if not d.exists():

@@ -2,8 +2,7 @@
 """
 Git 自动版本管理 — 记忆目录变更自动 commit，可 rollback
 """
-import subprocess, json, time
-from pathlib import Path
+import subprocess
 from datetime import datetime
 
 from memory_config import MEMORY_DIR
@@ -20,7 +19,7 @@ def _run_git(*args, cwd=None) -> str:
             cwd=str(cwd), encoding="utf-8", errors="replace"
         )
         return r.stdout.strip()
-    except Exception as e:
+    except Exception:
         return ""
 
 def init():
@@ -30,7 +29,11 @@ def init():
         _run_git("config", "user.email", "memory@universal-agent-memory.local")
         gitignore = MEMORY_DIR / ".gitignore"
         if not gitignore.exists():
-            gitignore.write_text("models/\n__pycache__/\n*.pyc\n", encoding="utf-8")
+            # 统一忽略规则：模型缓存目录 + 二进制向量索引 + Python 缓存
+            gitignore.write_text(
+                "models/\nsemantic_model/\nsemantic_index.faiss\n*.pyc\n__pycache__/\n",
+                encoding="utf-8",
+            )
         _run_git("add", "-A")
         _run_git("commit", "-m", "🎬 记忆仓库初始化", "--allow-empty")
         print(f"  📦 记忆 Git 仓库已初始化: {MEMORY_DIR}")
@@ -57,9 +60,6 @@ def log(limit: int = 10) -> list:
     return lines
 
 def rollback(hash: str):
-    """回滚到指定版本。校验 git restore 是否成功（无效 hash 不产生垃圾 commit）。
-    BUG修复: 旧实现用 _run_git 丢弃 returncode，无效 hash 时仍返回 True 并产生无意义 commit。
-    """
     if not GIT_DIR.exists():
         return False
     try:
@@ -78,7 +78,6 @@ def rollback(hash: str):
 def status() -> dict:
     if not GIT_DIR.exists():
         return {"initialized": False}
-    commits = len(_run_git("rev-list", "--count", "HEAD").split("\n")[0].strip()) > 0
     commit_count = _run_git("rev-list", "--count", "HEAD")
     return {
         "initialized": True,

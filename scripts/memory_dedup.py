@@ -2,7 +2,7 @@
 """
 语义去重引擎 — 在索引入库前检查相似度，防止索引膨胀
 """
-import sys, json, hashlib
+import sys, json
 from pathlib import Path
 from typing import List, Dict
 

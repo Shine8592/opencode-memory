@@ -4,7 +4,7 @@ JSON CLI bridge for opencode plugin -> memory system.
 Supports single-shot CLI mode and persistent daemon mode.
 Daemon mode keeps the embedding model loaded across calls.
 """
-import sys, json, os, traceback, io, contextlib
+import sys, json, io, contextlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -31,72 +31,28 @@ def _get_searcher():
             _searcher_cache.load_model()
     return _searcher_cache
 
-def _bm25_tokenize(text: str) -> list:
-    import re
-    return re.findall(r'\w+', text.lower())
-
 def _bm25_build_index():
+    # 复用 hybrid_search.BM25Index（消除双实现漂移，避免 IDF 公式不一致）
     global _BM25_CACHE
     if _BM25_CACHE is not None:
         return
     from memory_config import STM_DIR, METADATA_PATH
-    docs = []
-    for f in STM_DIR.glob("*.json"):
-        try:
-            item = json.loads(f.read_text(encoding="utf-8"))
-            txt = item.get("content", "") or ""
-            docs.append({"text": txt, "source": f"stm/{item.get('id', f.stem)}", "type": "stm"})
-        except Exception:
-            pass
-    if METADATA_PATH.exists():
-        for entry in json.loads(METADATA_PATH.read_text(encoding="utf-8")):
-            txt = entry.get("text", "") or ""
-            docs.append({"text": txt, "source": entry.get("source", "index"), "type": "indexed"})
-    if not docs:
-        _BM25_CACHE = []
-        return
-    N = len(docs)
-    tokenized = [_bm25_tokenize(d["text"]) for d in docs]
-    df = {}
-    for tokens in tokenized:
-        for t in set(tokens):
-            df[t] = df.get(t, 0) + 1
-    avgdl = sum(len(t) for t in tokenized) / N if N else 1
-    k1, b = 1.5, 0.75
-    for i, d in enumerate(docs):
-        tokens = tokenized[i]
-        dl = len(tokens)
-        score_map = {}
-        for t in tokens:
-            tf = tokens.count(t)
-            idf = ((N - df.get(t, 0) + 0.5) / (df.get(t, 0) + 0.5) + 1.0)
-            bm25 = idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / avgdl)))
-            score_map[t] = score_map.get(t, 0) + bm25
-        d["_bm25_tokens"] = tokens
-        d["_bm25_scores"] = score_map
-    _BM25_CACHE = docs
+    from hybrid_search import build_from_stm
+    _BM25_CACHE = build_from_stm(STM_DIR, METADATA_PATH)
 
 def _bm25_search(query: str, top_k: int = 5) -> list:
     _bm25_build_index()
-    if not _BM25_CACHE:
+    if _BM25_CACHE is None or not _BM25_CACHE.doc_count:
         return []
-    q_tokens = _bm25_tokenize(query)
-    if not q_tokens:
-        return []
-    scored = []
-    for d in _BM25_CACHE:
-        score = sum(d["_bm25_scores"].get(t, 0) for t in set(q_tokens))
-        if score > 0:
-            scored.append((score, d))
-    scored.sort(key=lambda x: -x[0])
+    hits = _BM25_CACHE.search(query, top_k=top_k)
     results = []
-    for score, d in scored[:top_k]:
+    for r in hits:
         results.append({
-            "text": d["text"][:500],
-            "source": d["source"],
-            "similarity": min(score / 10.0, 1.0),
-            "type": d["type"] + "_bm25",
-            "id": d["source"],
+            "text": r.get("text", "")[:500],
+            "source": r.get("source", ""),
+            "similarity": r.get("similarity", 0),
+            "type": (r.get("mem_type", "") or "stm") + "_bm25",
+            "id": r.get("source", ""),
         })
     return results
 
@@ -107,7 +63,6 @@ def cmd_recall(args: dict) -> dict:
     if not query:
         return {"ok": False, "error": "查询内容为空"}
     # Try semantic search first
-    semantic_ok = False
     if INDEX_PATH.exists():
         try:
             with _silent():
@@ -116,7 +71,6 @@ def cmd_recall(args: dict) -> dict:
                 if ok:
                     results = searcher.search(query, top_k=top_k)
                     if results:
-                        semantic_ok = True
                         final = []
                         for r in results:
                             final.append({

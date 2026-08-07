@@ -4,16 +4,15 @@
 实现短期记忆与长期记忆的智能协同
 """
 
-import os
 import sys
 import json
 import hashlib
 import time
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 
-import numpy as np
+import numpy as np  # 模块级依赖（惯例：与其他脚本保持一致）
 
 # Windows GBK 控制台下 emoji 打印会抛 UnicodeEncodeError，先重配置为 UTF-8
 try:
@@ -26,8 +25,7 @@ except Exception:
 
 sys.path.insert(0, str(Path(__file__).parent))
 from memory_config import (
-    MEMORY_DIR, STM_DIR, LTM_FILE, COORDINATOR_FILE,
-    SCRIPTS_DIR, ensure_dirs
+    STM_DIR, LTM_FILE, COORDINATOR_FILE, SCRIPTS_DIR
 )
 
 class ShortTermMemory:
@@ -74,7 +72,7 @@ class ShortTermMemory:
 
         # 1. 优先复用全局 searcher 已加载的模型（避免二次 465MB 加载）
         try:
-            import sys, importlib
+            import sys
             mcp_globals = sys.modules.get("__main__")
             if mcp_globals and hasattr(mcp_globals, "searcher") and mcp_globals.searcher:
                 model = mcp_globals.searcher.model
@@ -575,14 +573,14 @@ class MemoryCoordinator:
         transfers = []
         
         for item in stm_items:
-            # 优先使用已存的重要性分数（来自 _calc_initial_importance），
-            # 缺失时才用 calculate_importance 重算，避免重算公式覆盖已存高分
+            # 优先使用保存时计算的重要性分数（_calc_initial_importance），
+            # 缺失时才用 calculate_importance 重算，避免两套算法打架覆盖高分
             importance = item.get("importance_score")
             if importance is None:
                 importance = self.calculate_importance(item)
                 item["importance_score"] = importance
 
-            # 用户显式标记 important / user_marked 的记直接提升到阈值
+            # 用户显式标记 important / user_marked 的记忆直接视为达标
             meta = item.get("metadata", {})
             if meta.get("important") or meta.get("user_marked"):
                 threshold = self.state["importance_threshold"]

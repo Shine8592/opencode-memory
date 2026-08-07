@@ -2,20 +2,21 @@ import os
 from pathlib import Path
 
 def get_opencode_global() -> Path:
-    """全局记忆系统根目录（跨 Agent 通用）。
-    优先 MEMORY_GLOBAL_DIR；未设置时，优先真实部署目录 ~/.hermes（若其中含 memory）
+    """全局记忆系统根目录（跨 Agent 通用，不依赖 opencode 专属路径）。
+    优先 MEMORY_GLOBAL_DIR；未设置时，优先真实部署目录 ~/.hermes/memory（若存在）
     ，否则回退旧的 ~/.config/opencode/memory（为 cron/nohup 无 env 场景兜底）。
     """
     env = os.environ.get("MEMORY_GLOBAL_DIR")
     if env:
         return Path(env).resolve()
-    hermes = Path.home() / ".hermes"
-    if (hermes / "memory").exists():
+    # 真实部署路径探测：~/.hermes/memory 存在则优先（GitHub 修复版逻辑，兼容性保留）
+    hermes = Path.home() / ".hermes" / "memory"
+    if hermes.exists():
         return hermes
     return Path.home() / ".config" / "opencode" / "memory"
 
 def get_project_root() -> Path:
-    """项目根目录：优先 MEMORY_PROJECT_ROOT，兼容 OPENCODE_PROJECT_ROOT。
+    """项目根目录：优先 MEMORY_PROJECT_ROOT（跨 Agent 通用），兼容 OPENCODE_PROJECT_ROOT。
     未设置时回退 ~/.hermes（真实部署）。
     """
     env = os.environ.get("MEMORY_PROJECT_ROOT") or os.environ.get("OPENCODE_PROJECT_ROOT")
@@ -27,19 +28,22 @@ def get_project_root() -> Path:
 
 def get_memory_dir() -> Path:
     """项目级记忆存储目录（兼容旧路径 .opencode/memory，支持 MEMORY_STORE 覆盖）。
-    未设置时回退真实部署路径 ~/.hermes/memory。
-    """
+    未设环境变量时（如 cron/nohup 直接跑脚本），优先真实部署路径，
+    否则回退 cwd/.opencode/memory —— 避免读空目录导致索引/检索全 0。"""
     env = os.environ.get("MEMORY_STORE")
     if env:
         return Path(env).resolve()
-    if (Path.home() / ".hermes" / "memory").exists():
-        return Path.home() / ".hermes" / "memory"
+    # 真实部署路径探测：~/.hermes/memory 存在则优先（GitHub 修复版逻辑，兼容性保留）
+    hermes = Path.home() / ".hermes" / "memory"
+    if hermes.exists():
+        return hermes
     return get_project_root() / ".opencode" / "memory"
 
 def get_scripts_dir() -> Path:
     return get_opencode_global() / "scripts"
 
 def get_hermes_dir() -> Path:
+    """记忆核心文件目录（.opencode/）"""
     return get_project_root() / ".opencode"
 
 MEMORY_DIR = get_memory_dir()
@@ -96,7 +100,7 @@ LTM_FILE = HERMES_DIR / "MEMORY.md"
 COORDINATOR_FILE = MEMORY_DIR / "memory_coordinator.json"
 ARCHIVE_DIR = MEMORY_DIR / "archive"
 DAILY_DIR = MEMORY_DIR / "daily"
-DIFF_LOG_PATH = MEMORY_DIR / "memory_diff.jsonl"   # 审计日志
+DIFF_LOG_PATH = MEMORY_DIR / "memory_diff.jsonl"   # 审计日志（阶段三-8）
 
 MAX_CHUNK_CHARS = 1200
 
@@ -109,6 +113,8 @@ def ensure_dirs():
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     DAILY_DIR.mkdir(parents=True, exist_ok=True)
 
+
+# Faiss 原生 C++ I/O 不支持中文路径，用序列化绕开
 _faiss = None
 _np = None
 

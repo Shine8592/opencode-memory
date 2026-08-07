@@ -11,7 +11,7 @@ v2.0 升级：
 - memory_reflect 离线演化（阶段三-7）
 - memory_diff.jsonl 审计日志（阶段三-8）
 """
-import sys, json, time, os, traceback, contextlib, re
+import sys, json, os, contextlib
 from pathlib import Path
 from datetime import datetime
 
@@ -510,7 +510,7 @@ def do_forget(args):
 @tool("memory_status")
 def do_status(args):
     ensure_dirs()
-    lines = ["记忆系统 v2.0 (混合检索)", f"   项目: {PROJECT_ROOT}", f"   存储: {MEMORY_DIR}", ""]
+    lines = ["记忆系统 v3.0.1 (混合检索+重排)", f"   项目: {PROJECT_ROOT}", f"   存储: {MEMORY_DIR}", ""]
     lines.append(f"   向量索引: {'✅ 存在' if INDEX_PATH.exists() else '❌ 未构建'}")
     if METADATA_PATH.exists():
         try:
@@ -575,7 +575,8 @@ def do_prime(args):
             continue
 
     def _top(lst, n):
-        return sorted(lst, key=lambda x: (-x["score"], x["ts"]), reverse=False)[:n]
+        # 修复：同分时按 ts 降序取最新（旧代码 -score 升序 + ts 升序，同分时误取旧记忆）
+        return sorted(lst, key=lambda x: (x["score"], x["ts"]), reverse=True)[:n]
 
     lines = ["=" * 56, "记忆上下文注入 (memory_prime)", "=" * 56]
 

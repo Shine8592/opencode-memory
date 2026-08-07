@@ -16,7 +16,6 @@ Memory MCP 通用安装器（阶段二-4）
 """
 import sys
 import json
-import os
 import re
 import shutil
 from pathlib import Path

@@ -4,11 +4,8 @@
 智能记忆系统的核心存储架构
 """
 
-import os
-import sys
 import json
 import time
-import shutil
 import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
@@ -153,7 +150,6 @@ class WarmStorage:
         if storage_path is None:
             from memory_config import MEMORY_DIR
             storage_path = str(MEMORY_DIR / "warm")
-        self.storage_path = Path(storage_path)
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.index_file = self.storage_path / "index.json"

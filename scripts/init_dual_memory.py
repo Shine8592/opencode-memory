@@ -4,7 +4,7 @@ import json, time, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from memory_config import MEMORY_DIR, STM_DIR, COORDINATOR_FILE, ensure_dirs
+from memory_config import MEMORY_DIR, STM_DIR, COORDINATOR_FILE
 
 # 创建STM目录
 STM_DIR.mkdir(parents=True, exist_ok=True)

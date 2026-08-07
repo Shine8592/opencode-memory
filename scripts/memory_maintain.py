@@ -5,12 +5,12 @@ opencode 记忆维护 - 定时执行：
 2. 清理过期STM
 3. 增量索引更新
 """
-import sys, json, time
+import sys, json
 from pathlib import Path
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent))
-from memory_config import MEMORY_DIR, STM_DIR, LTM_FILE, COORDINATOR_FILE
+from memory_config import STM_DIR, LTM_FILE, COORDINATOR_FILE
 
 def maintain():
     # 1. 加载协调器状态
