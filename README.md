@@ -4,7 +4,7 @@
 
 <div align="center">
 
-![version](https://img.shields.io/badge/version-3.0.1-blue)
+![version](https://img.shields.io/badge/version-3.0.2-blue)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-green)
 ![MCP](https://img.shields.io/badge/Protocol-MCP%20JSON--RPC-orange)
 ![Agents](https://img.shields.io/badge/Agents-13%2B-purple)
@@ -14,7 +14,7 @@
 **让你的 AI 编程助手真正记住你：偏好、决策、踩过的坑、项目上下文。**  
 **跨会话、跨 Agent、离线优先、中英文同等流畅。**
 
-[快速开始](#-快速开始) · [工具文档](#-12-个-mcp-工具) · [架构设计](#-架构设计) · [安装到任意-Agent](#-一键安装到任意-agent-13-个)
+[快速开始](#-快速开始) · [工具文档](#-12-个-mcp-工具) · [架构设计](#-架构设计) · [安装到任意-Agent](#-一键安装到任意-agent-13-个) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -388,7 +388,8 @@ universal-agent-memory (2026-07) → 当前主项目：MCP 架构 + 混合检索
 
 | 版本 | 说明 |
 |------|------|
-| [v3.0.1](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.1) | **当前最新**：修复迭代（GBK/emoji 崩溃、MCP stdout 协议流污染、清理旧模型引用） |
+| [v3.0.2](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.2) | **当前最新**：三版本统一合并（部署版/工作副本/GitHub 对齐，保留全部优势）+ 修复索引自动更新机制（STM 纳入检测、定时重建） |
+| [v3.0.1](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.1) | 修复迭代（GBK/emoji 崩溃、MCP stdout 协议流污染、清理旧模型引用） |
 | [v3.0.0](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.0) | 首个 v3.0 快照：更名 universal-agent-memory 后的完整实现 |
 | [v2.0](https://github.com/Shine8592/universal-agent-memory/releases/tag/v2.0) | 语义向量记忆版（Hermes V1 演进）：混合检索 BM25+RRF+CrossEncoder，对应 [super-memory-hermes-v1](https://github.com/Shine8592/super-memory-hermes-v1) |
 | [v1.0](https://github.com/Shine8592/universal-agent-memory/releases/tag/v1.0) | 规则逻辑记忆 + 双记忆引擎阶段，对应 [skill-memory-logic](https://github.com/Shine8592/skill-memory-logic) / [SuperMemo-Du](https://github.com/Shine8592/SuperMemo-Du) |
