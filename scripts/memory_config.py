@@ -57,13 +57,31 @@ METADATA_PATH = MEMORY_DIR / "semantic_metadata.json"
 _ML_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"   # 优先：中英文效果均佳
 _EN_MODEL  = "all-MiniLM-L6-v2"                        # 回退：仅英文，但已下载
 
-def _choose_default_model() -> str:
-    """自动选最佳已缓存模型"""
+def _model_cache_dir() -> Path:
+    """模型缓存根目录。
+
+    兼容两种部署布局：
+    1) Hermes 真实部署：记忆数据在 ~/.hermes/memory，模型缓存在其同级 ~/.hermes/models；
+    2) 传统/环境变量布局：模型缓存在记忆根目录下的 models/（如 ~/.config/opencode/memory/models）。
+
+    注意：必须以「父目录名为 .hermes」作为 Hermes 布局的严格判定，
+    不能只凭「当前目录名为 memory」判断——旧配置路径 ~/.config/opencode/memory 也叫 memory。
+    """
     global_dir = get_opencode_global()
-    ml_cache = global_dir / "models" / _ML_MODEL.replace("/", "_").replace(":", "_")
+    # 真实 Hermes 部署：全局目录是 ~/.hermes/memory，模型在其父级 ~/.hermes/models
+    if global_dir.name == "memory" and global_dir.parent.name == ".hermes":
+        return global_dir.parent / "models"
+    # 其余布局（含旧配置）：模型缓存在 global_dir/models 下
+    return global_dir / "models"
+
+
+def _choose_default_model() -> str:
+    """自动选最佳已缓存模型（优先多语言，其次英文旧模型）"""
+    cache = _model_cache_dir()
+    ml_cache = cache / _ML_MODEL.replace("/", "_").replace(":", "_")
     if ml_cache.exists():
         return _ML_MODEL
-    legacy = global_dir / "semantic_model"
+    legacy = cache / _EN_MODEL.replace("/", "_").replace(":", "_")
     if legacy.exists():
         return _EN_MODEL
     return _ML_MODEL
