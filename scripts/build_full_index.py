@@ -21,7 +21,7 @@ from memory_config import (
     MODEL_NAME, MODEL_PATH, MEMORY_DIR, HERMES_DIR, SCRIPTS_DIR,
     INDEX_PATH, METADATA_PATH, CORE_FILES, DAILY_DIR,
     MAX_CHUNK_CHARS, ensure_dirs, PROJECT_ROOT,
-    write_index_safe, get_opencode_global
+    write_index_safe
 )
 
 def extract_core_and_logs():
@@ -109,6 +109,7 @@ def build_index(chunks):
     if MODEL_PATH.exists():
         model = SentenceTransformer(str(MODEL_PATH))
     else:
+        # 未缓存：在线下载；失败则显式报错（不再静默回退旧英文模型）
         try:
             os.environ.pop("TRANSFORMERS_OFFLINE", None)
             model = SentenceTransformer(MODEL_NAME)
@@ -116,12 +117,7 @@ def build_index(chunks):
             model.save(str(MODEL_PATH))
             os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
         except Exception as e:
-            legacy = get_opencode_global() / "semantic_model"
-            if legacy.exists():
-                print(f"  ⚠ 新模型不可用，回退旧模型: {e}")
-                model = SentenceTransformer(str(legacy))
-            else:
-                raise
+            raise RuntimeError(f"嵌入模型不可用且在线下载失败: {e}") from e
 
     texts = [c["text"] for c in chunks]
     if not texts:
