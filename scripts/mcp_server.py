@@ -438,7 +438,11 @@ def do_remember(args):
     stm = ShortTermMemory()
     meta_clean = {}
     if tags_raw:
-        meta_clean["tags"] = [_clean_surrogates(t.strip()) for t in tags_raw.split(",")]
+        # 兼容两种格式：字符串（逗号分隔）或列表（MCP 客户端可能直接传列表）
+        if isinstance(tags_raw, list):
+            meta_clean["tags"] = [_clean_surrogates(t.strip()) for t in tags_raw]
+        else:
+            meta_clean["tags"] = [_clean_surrogates(t.strip()) for t in tags_raw.split(",")]
     if mem_type:
         meta_clean["type"] = mem_type  # 传给 _infer_type：显式指定优先
 
