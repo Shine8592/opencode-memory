@@ -2,6 +2,45 @@
 
 本文件记录 Universal Agent Memory 的版本迭代历史，遵循 **本地迭代 → 验证 → 发布 GitHub 最新 → 旧版本归档** 的开发原则。
 
+## [v3.0.3] - 2026-08-11
+
+> 修复迭代：MCP 实机全功能验证 + 三处健壮性修复 + 版本号统一
+
+### 🐛 修复：`memory_remember` tags 参数类型兼容（实机测试发现）
+
+**问题**：MCP 客户端（如 Claude Code）调用 `memory_remember` 时可能把 `tags` 作为**列表**传递（`["tag1","tag2"]`），而代码只处理**逗号分隔字符串**（`tags.split(",")`）→ 抛 `'list' object has no attribute 'split'`。
+
+**修复**：`mcp_server.py` 的 `do_remember()` 现在同时兼容两种格式（`isinstance(tags_raw, list)` 分支）。
+
+**验证**：通过 MCP JSON-RPC 实际调用，列表/字符串/无 tags/空内容/重复去重 5 种场景全部通过。
+
+### 🔧 修复：嵌入模型缓存路径解析（Hermes 布局兼容）
+
+**问题**：`_choose_default_model()` 只从 `get_opencode_global()/models` 找缓存，而真实 Hermes 部署中模型缓存位于其**同级** `~/.hermes/models` → 多语言模型永远检测不到、静默回退英文。
+
+**修复**：`memory_config.py` 新增 `_model_cache_dir()`：仅当 `global_dir.name=="memory" and global_dir.parent.name==".hermes"` 时走同级 `models/`，其余布局保持 `global_dir/models`（对 `~/.config/opencode/memory` 无影响）。
+
+> **教训沉淀**：判定 Hermes 布局必须以「父目录名 == .hermes」严格判定，不能只凭「当前目录名 == memory」——旧配置路径 `~/.config/opencode/memory` 也叫 memory。
+
+### 🧹 重构：移除旧英文模型回退分支（评估 #2）
+
+**问题**：`build_full_index.py` 保留 `semantic_model/` 旧英文模型回退分支，但该目录在部署环境中不存在（死代码），且静默降级英文比显式报错更危险。
+
+**修复**：删除 legacy 回退，主模型不可用时改为显式 `raise RuntimeError`（提示重新下载）。
+
+### 🔢 版本号统一
+
+- `mcp_server.py` serverInfo `3.0.0` → `3.0.3`（原与 `memory_status` 标题不一致）
+- `memory_status` 标题 `v3.0.1` → `v3.0.3`
+
+### 🗂️ 涉及文件
+
+- `scripts/mcp_server.py`
+- `scripts/memory_config.py`
+- `scripts/build_full_index.py`
+
+---
+
 ## [v3.0.2] - 2026-08-07
 
 > 三版本统一合并 + 索引自愈机制修复

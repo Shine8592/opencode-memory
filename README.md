@@ -4,7 +4,7 @@
 
 <div align="center">
 
-![version](https://img.shields.io/badge/version-3.0.2-blue)
+![version](https://img.shields.io/badge/version-3.0.3-blue)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-green)
 ![MCP](https://img.shields.io/badge/Protocol-MCP%20JSON--RPC-orange)
 ![Agents](https://img.shields.io/badge/Agents-13%2B-purple)
@@ -388,7 +388,8 @@ universal-agent-memory (2026-07) → 当前主项目：MCP 架构 + 混合检索
 
 | 版本 | 说明 |
 |------|------|
-| [v3.0.2](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.2) | **当前最新**：三版本统一合并（部署版/工作副本/GitHub 对齐，保留全部优势）+ 修复索引自动更新机制（STM 纳入检测、定时重建） |
+| [v3.0.3](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.3) | **当前最新**：修复迭代（MCP 实机全功能验证 + `memory_remember` tags 列表格式兼容 + 模型缓存路径 Hermes 布局兼容 + 移除旧英文回退） |
+| [v3.0.2](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.2) | 三版本统一合并（部署版/工作副本/GitHub 对齐，保留全部优势）+ 修复索引自动更新机制（STM 纳入检测、定时重建） |
 | [v3.0.1](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.1) | 修复迭代（GBK/emoji 崩溃、MCP stdout 协议流污染、清理旧模型引用） |
 | [v3.0.0](https://github.com/Shine8592/universal-agent-memory/releases/tag/v3.0.0) | 首个 v3.0 快照：更名 universal-agent-memory 后的完整实现 |
 | [v2.0](https://github.com/Shine8592/universal-agent-memory/releases/tag/v2.0) | 语义向量记忆版（Hermes V1 演进）：混合检索 BM25+RRF+CrossEncoder，对应 [super-memory-hermes-v1](https://github.com/Shine8592/super-memory-hermes-v1) |
