@@ -15,6 +15,69 @@ import sys, json, os, contextlib
 from pathlib import Path
 from datetime import datetime
 
+def _bootstrap_sys_path():
+    """在部分 MCP 宿主以 stdio 拉起本服务、且不继承 PYTHONPATH / 不设
+    VIRTUAL_ENV 时，主动把常见的依赖目录补回 sys.path。
+
+    典型场景：QwenPaw 等框架 spawn 子进程后，venv 的 site-packages 与
+    PIP_TARGET 指定的 user site（如 torch/scipy 所在目录）都不在 sys.path 中，
+    导致 sentence-transformers 在首次向量检索时才 ImportError，而宿主只报
+    一个难以定位的 "Connection closed"。这里提前补回这些路径即可正常加载。
+
+    也可用环境变量 UAM_EXTRA_SYS_PATH（os.pathsep 分隔）显式注入路径，
+    任何宿主无需改代码即可传入自定义依赖目录。
+    """
+    import site
+    added = []
+    # 1) 显式注入（宿主提供，环境无关）
+    for p in os.environ.get("UAM_EXTRA_SYS_PATH", "").split(os.pathsep):
+        p = p.strip()
+        if p and p not in sys.path and os.path.isdir(p):
+            sys.path.insert(0, p)
+            added.append(p)
+    # 2) 自动识别当前 virtualenv
+    venv = os.environ.get("VIRTUAL_ENV")
+    if venv:
+        vsp = os.path.join(venv, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
+        if os.path.isdir(vsp) and vsp not in sys.path:
+            sys.path.insert(0, vsp)
+            added.append(vsp)
+    # 3) user site / global site（PIP_TARGET 场景）
+    try:
+        for usp in (site.getusersitepackages(),) + (tuple(site.getsitepackages()) if hasattr(site, "getsitepackages") else ()):
+            if usp and os.path.isdir(usp) and usp not in sys.path:
+                sys.path.append(usp)
+                added.append(usp)
+    except Exception:
+        pass
+    # 4) 兼容常规 shell 下的 PYTHONPATH
+    for p in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+        p = p.strip()
+        if p and p not in sys.path and os.path.isdir(p):
+            sys.path.insert(0, p)
+            added.append(p)
+    return added
+
+
+def _check_embedding_deps():
+    """启动期自检：缺依赖时给出可执行的清晰提示，而不是在首次检索时才崩。"""
+    missing = []
+    for mod in ("numpy", "faiss", "sentence_transformers"):
+        try:
+            __import__(mod)
+        except Exception:
+            missing.append(mod)
+    if missing:
+        print("[universal-agent-memory] WARNING: 缺失 embedding 依赖: "
+              + ", ".join(missing) + "。memory_recall 将无法工作。修复: `pip install "
+              + " ".join(missing) + "` 或设置 UAM_EXTRA_SYS_PATH 指向其所在目录。",
+              file=sys.stderr)
+    return missing
+
+
+_bootstrap_sys_path()
+_missing_deps = _check_embedding_deps()
+
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(line_buffering=True, write_through=True)
 
@@ -46,10 +109,16 @@ def _clean_obj(obj):
 def get_searcher():
     global searcher
     if searcher is None:
-        from semantic_search import SemanticMemorySearch
-        with contextlib.redirect_stdout(sys.stderr):
-            searcher = SemanticMemorySearch()
-            searcher.load_model()
+        try:
+            from semantic_search import SemanticMemorySearch
+            with contextlib.redirect_stdout(sys.stderr):
+                searcher = SemanticMemorySearch()
+                searcher.load_model()
+        except Exception as _e:
+            print(f"[universal-agent-memory] 加载 embedding 后端失败: {_e}", file=sys.stderr)
+            if _missing_deps:
+                print(f"[universal-agent-memory] 缺失依赖: {_missing_deps}（请设置 UAM_EXTRA_SYS_PATH 或 pip install 它们）", file=sys.stderr)
+            return None
     return searcher
 
 def auto_commit(msg: str):
