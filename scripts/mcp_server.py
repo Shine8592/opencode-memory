@@ -60,11 +60,19 @@ def _bootstrap_sys_path():
 
 
 def _check_embedding_deps():
-    """启动期自检：缺依赖时给出可执行的清晰提示，而不是在首次检索时才崩。"""
+    """启动期自检：缺依赖时给出可执行的清晰提示，而不是在首次检索时才崩。
+
+    用 importlib.util.find_spec 轻量探测（只检查模块是否可导入，不真正执行
+    sentence_transformers 等重包的顶层代码），避免启动即加载 embedding 后端、
+    拖慢 MCP 握手导致宿主把本服务判为未连接（显示灰色）。能否真正 import 仍由
+    get_searcher() 在首次检索时验证。
+    """
+    import importlib.util
     missing = []
     for mod in ("numpy", "faiss", "sentence_transformers"):
         try:
-            __import__(mod)
+            if importlib.util.find_spec(mod) is None:
+                missing.append(mod)
         except Exception:
             missing.append(mod)
     if missing:
