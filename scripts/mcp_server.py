@@ -93,7 +93,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from memory_config import (
     MODEL_NAME, MEMORY_DIR, INDEX_PATH, METADATA_PATH,
     STM_DIR, SCRIPTS_DIR, PROJECT_ROOT, DIFF_LOG_PATH, ensure_dirs,
-    RERANK_ENABLED
+    RERANK_ENABLED, HERMES_DIR
 )
 from hybrid_search import build_from_stm, rrf_merge
 
@@ -274,7 +274,7 @@ TOOL_DEFS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "background": {"type": "boolean", "description": "后台运行（默认false）", "default": False}
+                "background": {"type": "boolean", "description": "后台运行（默认 true 避免 MCP 执行超时；需同步等待结果时传 false）", "default": True}
             }
         }
     },
@@ -707,7 +707,6 @@ def do_prime(args):
             pass
 
     # 6. 核心记忆文件提示
-    from memory_config import HERMES_DIR
     core_present = [n for n in ("SOUL.md", "USER.md", "MEMORY.md", "AGENTS.md")
                     if (HERMES_DIR / n).exists()]
     lines.append("")
@@ -855,11 +854,22 @@ def do_reindex(args):
     ensure_dirs()
     chunks = extract_core_and_logs()
     MAX_CHUNKS = 200  # smaller to stay under timeout
-    if len(chunks) > MAX_CHUNKS:
-        chunks.sort(key=lambda c: c.get("timestamp", ""), reverse=True)
-        chunks = chunks[:MAX_CHUNKS]
     if not chunks:
         return "❌ 没有找到可索引的内容"
+    if len(chunks) > MAX_CHUNKS:
+        def _sort_key(c):
+            # 归一化为浮点时间戳：ISO 字符串与 st_mtime 浮点混排时直接比较会 TypeError
+            ts = c.get("timestamp", "")
+            try:
+                if isinstance(ts, (int, float)):
+                    return float(ts)
+                if isinstance(ts, str) and ts:
+                    return datetime.fromisoformat(ts).timestamp()
+            except Exception:
+                pass
+            return 0.0
+        chunks.sort(key=_sort_key, reverse=True)
+        chunks = chunks[:MAX_CHUNKS]
     do_build(chunks)
     return f"✅ 索引重建完成: {len(chunks)} 条"
 
@@ -905,7 +915,6 @@ def do_session_save(args):
     stm = ShortTermMemory()
 
     saved = []
-    from datetime import datetime
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     # 工作状态记为高优先级记忆（下次 prime 时优先召回）

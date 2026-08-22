@@ -4,7 +4,7 @@
 """
 import os, sys, json, re, time
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
@@ -18,7 +18,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8", 
 
 sys.path.insert(0, str(Path(__file__).parent))
 from memory_config import (
-    MODEL_NAME, MODEL_PATH, MEMORY_DIR, HERMES_DIR, SCRIPTS_DIR,
+    MODEL_NAME, MODEL_PATH, MEMORY_DIR, HERMES_DIR,
     INDEX_PATH, METADATA_PATH, CORE_FILES, DAILY_DIR,
     MAX_CHUNK_CHARS, ensure_dirs, PROJECT_ROOT,
     write_index_safe
@@ -102,7 +102,6 @@ def extract_core_and_logs():
 
 def build_index(chunks):
     """构建Faiss向量索引"""
-    import os
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     print(f"\n🧠 加载模型: {MODEL_NAME}")
@@ -171,8 +170,17 @@ if __name__ == '__main__':
     MAX_CHUNKS = 500
     if len(chunks) > MAX_CHUNKS:
         def sort_key(c):
-            ts = c.get('timestamp', '')
-            return ts if isinstance(ts, str) else str(ts)
+            # 统一归一化为浮点时间戳再比较：ISO 字符串与 st_mtime 浮点混合时，
+            # 若按字符串排序会出现 "9..." 排在 "17..." 之后的字典序错误
+            ts = c.get("timestamp", "")
+            try:
+                if isinstance(ts, (int, float)):
+                    return float(ts)
+                if isinstance(ts, str) and ts:
+                    return datetime.fromisoformat(ts).timestamp()
+            except Exception:
+                pass
+            return 0.0
         chunks.sort(key=sort_key, reverse=True)
         chunks = chunks[:MAX_CHUNKS]
         print(f"  📐 压缩至 {MAX_CHUNKS} 条（保留最新）")

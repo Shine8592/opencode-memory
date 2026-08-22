@@ -72,7 +72,6 @@ class ShortTermMemory:
 
         # 1. 优先复用全局 searcher 已加载的模型（避免二次 465MB 加载）
         try:
-            import sys
             mcp_globals = sys.modules.get("__main__")
             if mcp_globals and hasattr(mcp_globals, "searcher") and mcp_globals.searcher:
                 model = mcp_globals.searcher.model
@@ -479,27 +478,6 @@ class LongTermMemory:
         self.sections = self._load_sections()
         
         return section_id
-    
-    def get_important_concepts(self, limit: int = 10) -> List[str]:
-        """提取重要概念"""
-        concepts = []
-        
-        for section in self.sections:
-            # 查找包含核心概念的句子
-            lines = section["content"].split("\n")
-            for line in lines:
-                line = line.strip()
-                if len(line) > 20 and len(line) < 200:
-                    # 检查是否包含重要关键词
-                    important_keywords = [
-                        "原则", "规则", "核心", "重要", "关键",
-                        "必须", "应该", "建议", "教训", "经验"
-                    ]
-                    
-                    if any(kw in line for kw in important_keywords):
-                        concepts.append(line[:100])
-        
-        return concepts[:limit]
 
 
 class MemoryCoordinator:

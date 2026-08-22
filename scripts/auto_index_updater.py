@@ -14,7 +14,6 @@ import time
 sys.path.insert(0, str(Path(__file__).parent))
 
 from memory_config import MODEL_NAME, MEMORY_DIR
-from semantic_search import SemanticMemorySearch
 
 AUTO_UPDATE_FILE = MEMORY_DIR / ".last_index_update"
 CHECK_INTERVAL = 300
@@ -23,7 +22,6 @@ class AutoIndexUpdater:
     """自动索引更新器"""
     
     def __init__(self):
-        self.searcher = SemanticMemorySearch()
         self.last_update_file = AUTO_UPDATE_FILE
         
     def get_memory_files_mtime(self) -> Dict[str, float]:

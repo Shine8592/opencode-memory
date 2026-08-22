@@ -7,12 +7,9 @@ Uses pre-trained embeddings for high-quality semantic search
 import os
 import sys
 import json
-import hashlib
 from pathlib import Path
 from typing import List, Dict
 import time
-
-import numpy as np
 
 # Check for required packages
 try:
@@ -33,9 +30,8 @@ except ImportError:
 
 sys.path.insert(0, str(Path(__file__).parent))
 from memory_config import (
-    MODEL_NAME, MEMORY_DIR, HERMES_DIR, INDEX_PATH, METADATA_PATH,
-    MODEL_PATH, DAILY_DIR, CORE_FILES, ensure_dirs, SCRIPTS_DIR,
-    PROJECT_ROOT, write_index_safe, read_index_safe
+    MODEL_NAME, MEMORY_DIR, INDEX_PATH, METADATA_PATH,
+    MODEL_PATH, SCRIPTS_DIR, read_index_safe
 )
 
 class SemanticMemorySearch:
@@ -75,146 +71,7 @@ class SemanticMemorySearch:
 
         elapsed = time.time() - start_time
         print(f"✅ Model loaded ({elapsed:.1f}s) dim={self.dimension} path={MODEL_PATH}")
-    
-    def load_text_chunks(self) -> List[Dict]:
-        """Load text chunks from memory files"""
-        chunks = []
-        
-        print("\n📄 Loading text chunks...")
-        for filename in CORE_FILES:
-            file_path = HERMES_DIR / filename
-            if not file_path.exists():
-                file_path = PROJECT_ROOT / filename
-            if not file_path.exists():
-                continue
-            
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
-                sections = content.split("\n## ")
-                for i, section in enumerate(sections):
-                    if not section.strip():
-                        continue
-                    
-                    if not section.startswith("#"):
-                        section = "## " + section
-                    
-                    section = section.strip()
-                    if len(section) > 2000:
-                        section = section[:2000] + "..."
-                    
-                    if len(section) > 50:
-                        chunks.append({
-                            "id": f"{filename}:{i}",
-                            "text": section,
-                            "source": filename,
-                            "type": "core_memory",
-                            "chunk_index": i
-                        })
-            except Exception as e:
-                print(f"  ⚠ Error reading {file_path}: {e}")
-        
-        if DAILY_DIR.exists():
-            for file_path in sorted(DAILY_DIR.glob("*.md")):
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    
-                    if content.strip() and len(content) > 50:
-                        chunks.append({
-                            "id": f"daily/{file_path.name}:0",
-                            "text": content.strip(),
-                            "source": f"daily/{file_path.name}",
-                            "type": "daily_log"
-                        })
-                except Exception as e:
-                    print(f"  ⚠ Error reading {file_path}: {e}")
-        
-        return chunks
-    
-    def build_index(self):
-        """Build semantic search index"""
-        print("\n🚀 Building Semantic Memory Index")
-        print("=" * 60)
-        
-        ensure_dirs()
-        
-        if not self.model:
-            self.load_model()
-        
-        chunks = self.load_text_chunks()
-        print(f"\n📊 Found {len(chunks)} chunks to index")
-        
-        if not chunks:
-            print("❌ No chunks found to index")
-            return False
-        
-        # Generate embeddings
-        print("\n🧠 Generating embeddings...")
-        start_time = time.time()
-        
-        texts = [chunk["text"] for chunk in chunks]
-        
-        # Batch processing for efficiency
-        batch_size = 32
-        all_embeddings = []
-        
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i+batch_size]
-            print(f"  Processing batch {i//batch_size + 1}/{(len(texts)-1)//batch_size + 1}...", end=" ")
-            
-            batch_embeddings = self.model.encode(batch, show_progress_bar=False, convert_to_numpy=True)
-            all_embeddings.append(batch_embeddings)
-            print(f"✅")
-        
-        embeddings = np.vstack(all_embeddings)
-        elapsed = time.time() - start_time
-        
-        print(f"\n✅ Embeddings generated in {elapsed:.1f}s")
-        print(f"   Shape: {embeddings.shape}")
-        print(f"   Average: {elapsed/len(chunks):.2f}s per chunk")
-        
-        # Normalize embeddings for cosine similarity
-        print("\n🔧 Normalizing embeddings...")
-        faiss.normalize_L2(embeddings)
-        
-        # Build Faiss index
-        print("💾 Building Faiss index...")
-        index = faiss.IndexFlatIP(self.dimension)
-        index.add(embeddings)
-        
-        print(f"   Saving to {INDEX_PATH}...")
-        write_index_safe(index, INDEX_PATH)
-        
-        # Save metadata
-        metadata = []
-        for i, chunk in enumerate(chunks):
-            metadata.append({
-                **chunk,
-                "embedding_index": i,
-                "hash": hashlib.md5(chunk["text"].encode()).hexdigest()[:12]
-            })
-        
-        with open(METADATA_PATH, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
-        
-        print(f"   Metadata saved to {METADATA_PATH}")
-        
-        print(f"\n{'=' * 60}")
-        print(f"✅ INDEX BUILT SUCCESSFULLY!")
-        print(f"{'=' * 60}")
-        print(f"   Total chunks: {len(metadata)}")
-        print(f"   Embedding dim: {self.dimension}")
-        print(f"   Model: {MODEL_NAME}")
-        print(f"   Index: {INDEX_PATH}")
-        print(f"   Metadata: {METADATA_PATH}")
-        
-        self.index = index
-        self.metadata = metadata
-        
-        return True
-    
+
     def load_index(self):
         """Load existing index"""
         print("\n📂 Loading existing index...")
@@ -323,8 +180,13 @@ def main():
     command = sys.argv[1]
     
     if command == "build":
-        success = searcher.build_index()
-        sys.exit(0 if success else 1)
+        # 权威构建流程在 build_full_index.py（扫描 stm/short_term/scenarios 等
+        # 全部子目录 + 批内去重）。本类旧 build_index() 只扫 core+daily，
+        # 会生成残缺索引并覆盖权威索引文件，此处转发避免误用。
+        import subprocess
+        target = Path(__file__).parent / "build_full_index.py"
+        r = subprocess.run([sys.executable, str(target)])
+        sys.exit(r.returncode)
     
     elif command == "search":
         if len(sys.argv) < 3:

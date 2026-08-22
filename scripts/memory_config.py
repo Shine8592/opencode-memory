@@ -86,7 +86,6 @@ def _choose_default_model() -> str:
         return _EN_MODEL
     return _ML_MODEL
 
-DEFAULT_MODEL = _ML_MODEL
 MODEL_NAME = os.environ.get("MEMORY_MODEL_NAME", _choose_default_model())
 
 # --- Cross-encoder 重排模型（v3.0，支持 MEMORY_RERANKER 环境变量；off 禁用） ---
