@@ -53,9 +53,9 @@ SCRIPTS_DIR = get_scripts_dir()
 INDEX_PATH = MEMORY_DIR / "semantic_index.faiss"
 METADATA_PATH = MEMORY_DIR / "semantic_metadata.json"
 
-# 嵌入模型：支持 MEMORY_MODEL_NAME 覆盖，智能默认：优先多语言（已下载），否则回退旧模型
-_ML_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"   # 优先：中英文效果均佳
-_EN_MODEL  = "all-MiniLM-L6-v2"                        # 回退：仅英文，但已下载
+# 嵌入模型：支持 MEMORY_MODEL_NAME 环境变量覆盖；默认多语言模型。
+# （旧英文模型 all-MiniLM-L6-v2 已弃用：本机从未缓存、代码回退分支已于本次清理移除）
+_ML_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"   # 中英文效果均佳，384 维
 
 def _model_cache_dir() -> Path:
     """模型缓存根目录。
@@ -75,18 +75,7 @@ def _model_cache_dir() -> Path:
     return global_dir / "models"
 
 
-def _choose_default_model() -> str:
-    """自动选最佳已缓存模型（优先多语言，其次英文旧模型）"""
-    cache = _model_cache_dir()
-    ml_cache = cache / _ML_MODEL.replace("/", "_").replace(":", "_")
-    if ml_cache.exists():
-        return _ML_MODEL
-    legacy = cache / _EN_MODEL.replace("/", "_").replace(":", "_")
-    if legacy.exists():
-        return _EN_MODEL
-    return _ML_MODEL
-
-MODEL_NAME = os.environ.get("MEMORY_MODEL_NAME", _choose_default_model())
+MODEL_NAME = os.environ.get("MEMORY_MODEL_NAME", _ML_MODEL)
 
 # --- Cross-encoder 重排模型（v3.0，支持 MEMORY_RERANKER 环境变量；off 禁用） ---
 _DEF_RERANKER = "cross-encoder/ms-marco-MiniLM-L-6-v2"

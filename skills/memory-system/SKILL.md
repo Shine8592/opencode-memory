@@ -44,7 +44,7 @@ project_root/
 ### Architecture
 
 ```
-User Query -> SentenceTransformer (all-MiniLM-L6-v2, 384-dim)
+User Query -> SentenceTransformer (paraphrase-multilingual-MiniLM-L12-v2, 384-dim)
                 |
          Faiss Flat Index
                 |
