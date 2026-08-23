@@ -497,7 +497,7 @@ def do_recall(args):
         src = r.get("source", "?")
         mtype = r.get("mem_type", "") or r.get("type", "")
         type_tag = f"[{mtype}]" if mtype else ""
-        text = _clean_surrogates(r.get("text", "")[:200].replace("\n", " "))
+        text = _clean_surrogates(r.get("text", "")[:5000].replace("\n", " "))
         lines.append(f"#{rank} (relv {norm:.2f}) [{src}]{type_tag} {text}")
     return "\n".join(lines)
 
