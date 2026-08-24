@@ -131,7 +131,28 @@ def cmd_recent(args: dict) -> dict:
     return {"ok": True, "items": items[:limit]}
 
 def cmd_pitfalls(args: dict) -> dict:
-    return cmd_recent({"tag": "pitfall", "limit": args.get("limit", 10)})
+    """踩坑记忆检索。
+    修复口径不一致：全系统权威分类字段是 mem_type（memory_remember 的 type 落点，
+    memory_status / memory_recall.type_filter 均按它统计过滤），此前只按
+    metadata.tags 匹配会漏掉所有通过 type 存入的踩坑记录。现改为 mem_type 优先，
+    同时兼容仅打了 pitfall 标签的历史数据。"""
+    from memory_config import STM_DIR
+    limit = args.get("limit", 10)
+    items = []
+    for f in sorted(STM_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:limit * 3]:
+        try:
+            item = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        meta = item.get("metadata", {})
+        tags = meta.get("tags", [])
+        if isinstance(tags, str):
+            tags = [tags]
+        if item.get("mem_type", "") == "pitfall" or "pitfall" in tags:
+            items.append(item)
+            if len(items) >= limit:
+                break
+    return {"ok": True, "items": items}
 
 def cmd_score_all(args: dict) -> dict:
     from memory_config import STM_DIR
